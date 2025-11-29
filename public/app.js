@@ -539,7 +539,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.state.energy = currentWh + (addedKwh * 1000);
 
             // Hiển thị 4 số thập phân để thấy tốc độ tăng Energy khác biệt rõ ràng
-            const energyDisplay = (this.state.energy / 1000).toFixed(4); 
+            const energyDisplay = (this.state.energy / 1000).toFixed(2); 
             this.dom.energyInfo.textContent = `${energyDisplay} kWh`;
             
             this.calculateElectricalParameters(); 

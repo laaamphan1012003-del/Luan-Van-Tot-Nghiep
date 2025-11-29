@@ -11,34 +11,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 view.classList.remove('active');
             }
         });
-        // Cuộn lên đầu trang khi chuyển view
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     let isChargingSessionActive = false;
 
-    // --- LOGIC NÚT BACK (QUAY VỀ SCAN) ---
+    // --- LOGIC NÚT BACK (LOGOUT) ---
     if (statusBackBtn) {
         statusBackBtn.addEventListener('click', () => {
-            // Nếu đang sạc (dù nút back đã bị ẩn nhưng check thêm cho chắc), chặn lại
-            if (isChargingSessionActive) return;
+            if (isChargingSessionActive) {
+                alert("Please stop charging before disconnecting.");
+                return;
+            }
+            
+            // Xóa thông tin lưu trữ để lần sau không tự connect nữa
+            localStorage.removeItem('savedBackendUrl');
+            localStorage.removeItem('savedChargeboxId');
 
-            // Ngắt kết nối WebSocket nếu đang mở
             if (websocket) {
                 websocket.close();
                 websocket = null;
             }
 
-            // Reset giao diện sạc
             const connectorsContainer = document.getElementById('connectors-container');
-            connectorsContainer.innerHTML = `
-                <div class="connector-placeholder">
-                    <i class="fa-solid fa-plug-circle-xmark"></i>
-                    <p>Disconnected</p>
-                </div>
-            `;
-
-            // Quay về màn hình kết nối
+            if (connectorsContainer) {
+                connectorsContainer.innerHTML = `
+                    <div class="connector-placeholder">
+                        <i class="fa-solid fa-plug-circle-xmark"></i>
+                        <p>Disconnected</p>
+                    </div>
+                `;
+            }
             switchView('connection-view');
         });
     }
@@ -57,6 +60,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let html5QrCode = null;
     let isScanning = false;
     let isReconnecting = false;
+
+    // --- TÍNH NĂNG MỚI: AUTO CONNECT ---
+    const savedUrl = localStorage.getItem('savedBackendUrl');
+    const savedId = localStorage.getItem('savedChargeboxId');
+    
+    if (savedUrl && savedId) {
+        console.log("Found saved session. Auto-connecting...");
+        backendUrlInput.value = savedUrl;
+        chargeboxIdInput.value = savedId;
+        setTimeout(() => connectToStation(), 500);
+    }
 
     // --- QR CODE SCANNER ---
     const startScanner = async () => {
@@ -185,32 +199,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const sendRequest = (action, payload) => sendMessage(2, generateUniqueId(), action, payload);
     const sendResponse = (uniqueId, payload) => sendMessage(3, uniqueId, payload);
 
-    const resetToEmptyState = () => {
-    console.log("Resetting to empty state...");
-    
-    //Xóa giao diện sạc, hiển thị lại Placeholder (Cửa sổ trống)
-    if (connectorsContainer) {
-        connectorsContainer.innerHTML = `
-            <div class="connector-placeholder">
-                <i class="fa-solid fa-plug-circle-xmark"></i>
-                <p>Please connect to a Charge Point using the Connection tab below.</p>
-            </div>
-        `;
-    }
-
-    // Chuyển tab về màn hình Connection 
-    switchView('connection-view');
-
-    // Reset biến dữ liệu
-    chargePoint = null; 
-    
-    // Cập nhật Banner trạng thái
-    statusBanner.style.display = 'block';
-    statusBanner.className = 'connection-status-banner error';
-    statusBanner.textContent = 'Disconnected. Please connect again.';
-    };
-
-    connectBtn.addEventListener('click', () => {
+    // --- HÀM KẾT NỐI CHÍNH (Dùng chung cho nút bấm và auto-connect) ---
+    const connectToStation = () => {
         const backendUrl = backendUrlInput.value.trim();
         const chargeboxId = chargeboxIdInput.value.trim();
 
@@ -219,10 +209,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // QUAN TRỌNG: Lưu lại thông tin kết nối
+        localStorage.setItem('savedBackendUrl', backendUrl);
+        localStorage.setItem('savedChargeboxId', chargeboxId);
+
         if (websocket && websocket.readyState === WebSocket.OPEN) {
-             isReconnecting = True;
-             websocket.close();
-             console.log("Closing existing connection before reconnecting...");
+            isReconnecting = true;
+            websocket.close();
+            console.log("Closing existing connection before reconnecting...");
         }
 
         // Chuyển sang View Status
@@ -245,7 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
             chargePoint = new ChargePointStatus(chargeboxId, sendRequest, sendResponse, (isCharging) => {
                 isChargingSessionActive = isCharging;
 
-            if (statusBackBtn) {
+                if (statusBackBtn) {
                     statusBackBtn.style.display = isCharging ? 'none' : 'flex';
                 }
             });
@@ -280,26 +274,48 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         
         websocket.onclose = () => {
-             if (chargePoint) {
-                if (websocket && event.target !== websocket) {
-                 console.log("Ignored onclose event from old WebSocket.");
-                 return;
-             }
-                if (websocket && event.target !== websocket) {
-                 console.log("Ignored onclose event from old WebSocket.");
-                 return;
-             }
-                switchView('connection-view');
-                statusBanner.style.display = 'block';
-                statusBanner.classList.add('error');
-                statusBanner.textContent = `Connection with ${chargeboxId} closed.`;
-                chargePoint = null;
-                isChargingSessionActive = false;
-                if (statusBackBtn) statusBackBtn.style.display = 'flex';
-                resetToEmptyState();
-             }
+            console.log("WebSocket closed");
+            // Nếu đang ở màn hình status mà mất kết nối -> Tự động reconnect sau 3s
+            if (document.getElementById('status-view').classList.contains('active')) {
+                console.log("Auto reconnecting in 3s...");
+                setTimeout(() => {
+                    connectToStation();
+                }, 3000);
+            } else {
+                // Nếu người dùng chủ động logout (đang ở connection view)
+                if (chargePoint) {
+                    chargePoint = null;
+                }
+            }
         };
-    });
+    };
+
+    // Gán sự kiện cho nút Connect
+    connectBtn.addEventListener('click', connectToStation);
+
+    const resetToEmptyState = () => {
+        console.log("Resetting to empty state...");
+        
+        if (connectorsContainer) {
+            connectorsContainer.innerHTML = `
+                <div class="connector-placeholder">
+                    <i class="fa-solid fa-plug-circle-xmark"></i>
+                    <p>Please connect to a Charge Point using the Connection tab below.</p>
+                </div>
+            `;
+        }
+
+        // Chuyển tab về màn hình Connection 
+        switchView('connection-view');
+
+        // Reset biến dữ liệu
+        chargePoint = null; 
+        
+        // Cập nhật Banner trạng thái
+        statusBanner.style.display = 'block';
+        statusBanner.className = 'connection-status-banner error';
+        statusBanner.textContent = 'Disconnected. Please connect again.';
+    };
 
     // --- CHARGE POINT STATUS CLASS ---
     class ChargePointStatus {
@@ -314,6 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.meterValueIntervalId = null;
             this.isPluggedIn = false;
             this.isEvReady = false;
+            this.isRestored = false; // Thêm: Cờ để track session restore
             
             // Charging parameters
             this.BATTERY_CAPACITY = 42; // kWh
@@ -665,7 +682,6 @@ document.addEventListener('DOMContentLoaded', () => {
             this.dom.timeEstimate.textContent = this.formatTime(estimate.timeMinutes);
             this.dom.costEstimate.textContent = `${estimate.cost.toLocaleString()} VND`;
             
-            // Enable/disable and style button based on target level
             if (this.targetPowerLevel > this.currentPowerLevel) {
                 this.dom.confirmPaymentBtn.disabled = false;
                 this.dom.confirmPaymentBtn.classList.add('enabled');
@@ -701,7 +717,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (this.isEvReady && this.isPluggedIn) {
                     this.sendRequest("StatusNotification", { connectorId: 1, status: "Preparing", errorCode: "NoError" });
                     this.updateStatusUI('Preparing');
-                    // Show payment interface when ready
                     this.showPaymentSection();
                 } else if (this.isPluggedIn) {
                     this.sendRequest("StatusNotification", { connectorId: 1, status: "Unavailable", errorCode: "NoError" });
@@ -724,12 +739,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.classList.add('active');
                     this.selectedChargeSpeed = btn.dataset.speed;
                     
-                    // Update charging power and price
                     const speedConfig = this.chargeSpeedOptions[this.selectedChargeSpeed];
                     this.CHARGING_POWER = speedConfig.power;
                     this.PRICE_PER_KWH = speedConfig.price;
                     
-                    // Recalculate estimates
                     this.updateEstimates();
                 });
             });
@@ -762,7 +775,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // Back button handlers
             this.dom.paymentMethodBackBtn.addEventListener('click', () => {
                 this.dom.paymentMethodSection.style.display = 'none';
-                // Reset payment method selection when going back to charging target
                 this.selectedPaymentMethod = null;
                 this.showPaymentSection();
             });
@@ -805,15 +817,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         showPaymentMethodSelector(amount) {
-            // Hide payment section
             this.hidePaymentSection();
             
-            // Set default payment method only if not already set
             if (!this.selectedPaymentMethod) {
                 this.selectedPaymentMethod = 'vietqr';
             }
             
-            // Update UI to reflect selected payment method
             this.dom.paymentMethodBtns.forEach(btn => {
                 if (btn.dataset.method === this.selectedPaymentMethod) {
                     btn.classList.add('active');
@@ -822,39 +831,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
             
-            // Update amount display
             this.dom.summaryValue.textContent = `${amount.toLocaleString()} VND`;
             
-            // Lock plug and EV buttons during payment
             this.dom.plugStatusBtn.disabled = true;
             this.dom.evStatusBtn.disabled = true;
             
-            // Show payment method selector
             this.dom.paymentMethodSection.style.display = 'block';
         }
 
         showVietQRPayment(amount) {
-            // Hide payment method selector
             this.dom.paymentMethodSection.style.display = 'none';
             
-            // Generate VietQR code
             const qrUrl = this.generateVietQR(amount);
             this.dom.vietqrImage.src = qrUrl;
             this.dom.amountValue.textContent = `${amount.toLocaleString()} VND`;
             
-            // Keep buttons locked during payment
             this.dom.plugStatusBtn.disabled = true;
             this.dom.evStatusBtn.disabled = true;
             
-            // Show VietQR section
             this.dom.vietqrSection.style.display = 'block';
             
-            // Auto-hide after 5 seconds
             setTimeout(() => {
                 this.dom.vietqrSection.style.display = 'none';
                 this.showToast('Payment successful!');
                 
-                // Start charging after toast
                 setTimeout(() => {
                     this.startChargingProcess('MOBILE_APP_USER');
                     this.showChargingProgress();
@@ -863,17 +863,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         showStripePayment(amount) {
-            // Hide payment method selector
             this.dom.paymentMethodSection.style.display = 'none';
             
-            // Navigate to dedicated Stripe screen
             if (typeof window.navigateToStripePayment === 'function') {
                 window.navigateToStripePayment(amount);
             }
         }
 
         processStripePayment() {
-            // Validate inputs
             const cardNumber = this.dom.stripeCardNumber.value.replace(/\s/g, '');
             const expiry = this.dom.stripeExpiry.value;
             const cvc = this.dom.stripeCvc.value;
@@ -899,23 +896,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             
-            // Disable button and show processing
             this.dom.stripePayBtn.disabled = true;
             this.dom.stripePayBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
             
-            // Simulate payment processing (2 seconds)
             setTimeout(() => {
-                // Hide Stripe section
                 this.dom.stripeSection.style.display = 'none';
                 
-                // Re-enable button
                 this.dom.stripePayBtn.disabled = false;
                 this.dom.stripePayBtn.innerHTML = '<i class="fas fa-lock"></i> Pay Now';
                 
-                // Show success toast
                 this.showToast('Payment successful!');
                 
-                // Start charging after toast
                 setTimeout(() => {
                     this.startChargingProcess('MOBILE_APP_USER');
                     this.showChargingProgress();
@@ -929,15 +920,12 @@ document.addEventListener('DOMContentLoaded', () => {
             this.dom.startStopBtn.textContent = 'Stop Charging';
             this.dom.startStopBtn.className = 'action-btn start-stop-btn stop';
             
-            // Set the target percentage display
             this.dom.chargingTarget.textContent = `${this.targetPowerLevel}%`;
             
-            // Calculate charging duration
             const estimate = this.calculateChargingEstimate(this.targetPowerLevel);
-            this.chargingDuration = estimate.timeMinutes * 60; // convert to seconds
+            this.chargingDuration = estimate.timeMinutes * 60;
             this.chargingStartTime = Date.now();
             
-            // Store the starting percentage for display
             this.chargingStartPercentage = this.currentPowerLevel;
             
             this.updateChargingProgress();
@@ -950,25 +938,21 @@ document.addEventListener('DOMContentLoaded', () => {
         updateChargingProgress() {
             if (!this.transactionId || !this.chargingStartTime) return;
             
-            const elapsed = (Date.now() - this.chargingStartTime) / 1000; // seconds
-            const totalPercentageGain = this.targetPowerLevel - this.chargingStartPercentage;
-            const percentageGained = (elapsed / this.chargingDuration) * totalPercentageGain;
-            const currentPercentage = Math.min(this.chargingStartPercentage + percentageGained, this.targetPowerLevel);
-            const remaining = Math.max(this.chargingDuration - elapsed, 0);
+            const currentPercentage = this.currentPowerLevel; 
             
-            // Update UI - Show "current% → target%" format
             this.dom.chargingPercentage.innerHTML = `${Math.floor(currentPercentage)}% → <span class="charging-target">${this.targetPowerLevel}%</span>`;
             this.dom.progressBarFill.style.width = `${currentPercentage}%`;
             
-            // Format remaining time as HH:mm:ss
-            const hours = Math.floor(remaining / 3600);
-            const minutes = Math.floor((remaining % 3600) / 60);
-            const seconds = Math.floor(remaining % 60);
-            this.dom.timeRemaining.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-            
-            // Check if charging complete
+            if (this.chargingStartTime && this.chargingDuration) {
+                const elapsed = (Date.now() - this.chargingStartTime) / 1000;
+                const remaining = Math.max(this.chargingDuration - elapsed, 0);
+                const hours = Math.floor(remaining / 3600);
+                const minutes = Math.floor((remaining % 3600) / 60);
+                const seconds = Math.floor(remaining % 60);
+                this.dom.timeRemaining.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
+
             if (currentPercentage >= this.targetPowerLevel) {
-                // Save new power level to localStorage
                 this.currentPowerLevel = this.targetPowerLevel;
                 localStorage.setItem('currentPowerLevel', this.currentPowerLevel.toString());
                 this.stopChargingProcess();
@@ -980,12 +964,18 @@ document.addEventListener('DOMContentLoaded', () => {
         handleMessage(message) {
             const [type, uniqueId, actionOrPayload, payload] = message;
 
-            if (type === 2) { // It's a CALL (a command from the server)
+            if (type === 2) {
                 this.handleRemoteCommand(uniqueId, actionOrPayload, payload);
-            } else if (type === 3) { // It's a CALLRESULT (a response to our request)
+            } else if (type === 3) {
                 if (actionOrPayload.status === 'Accepted' && actionOrPayload.interval) {
-                    this.sendRequest("StatusNotification", { connectorId: 1, status: "Available", errorCode: "NoError" });
-                    this.updateStatusUI('Available');
+                    console.log("Boot Accepted. Waiting for possible Session Restore...");
+                    setTimeout(() => {
+                        if (!this.isRestored && !this.transactionId) {
+                            console.log("No session to restore. Setting to Available.");
+                            this.sendRequest("StatusNotification", { connectorId: 1, status: "Available", errorCode: "NoError" });
+                            this.updateStatusUI('Available');
+                        }
+                    }, 1000);
                 }
 
                 if (actionOrPayload.transactionId && actionOrPayload.idTagInfo && actionOrPayload.idTagInfo.status === 'Accepted') {
@@ -1026,12 +1016,40 @@ document.addEventListener('DOMContentLoaded', () => {
                         try {
                             const sessionState = JSON.parse(payload.data);
                             this.restoreSession(sessionState);
+                            this.isRestored = true;
                             this.sendResponse(uniqueId, { status: "Accepted" });
                         } catch (e) {
                             console.error("Failed to restore session:", e);
                             this.sendResponse(uniqueId, { status: "Rejected" });
                         }
-                    } else {
+                    } 
+                    // --- XỬ LÝ ĐỒNG BỘ TRẠNG THÁI TỪ SERVER (SyncState) ---
+                    else if (payload.vendorId === 'OCPP_Simulator' && payload.messageId === 'SyncState') {
+                        console.log("Received SyncState from server:", payload.data);
+                        try {
+                            const state = JSON.parse(payload.data);
+                            
+                            // Cập nhật giá trị nội bộ từ Server (Single Source of Truth)
+                            this.meterValue = parseFloat(state.energy) || 0;
+                            this.currentPowerLevel = parseFloat(state.soc) || this.currentPowerLevel;
+                            
+                            // Cập nhật giao diện ngay lập tức
+                            this.dom.energyValue.textContent = `${(this.meterValue / 1000).toFixed(2)} kWh`;
+                            if(this.dom.progressBarFill) {
+                                this.dom.chargingPercentage.textContent = `${Math.floor(this.currentPowerLevel)}%`;
+                                this.dom.progressBarFill.style.width = `${this.currentPowerLevel}%`;
+                            }
+                            if (state.timeRemaining) {
+                                this.dom.timeRemaining.textContent = state.timeRemaining;
+                            }
+                            
+                            this.sendResponse(uniqueId, { status: "Accepted" });
+                        } catch(e) {
+                            console.error("Failed to process SyncState:", e);
+                            this.sendResponse(uniqueId, { status: "Rejected" });
+                        }
+                    }
+                    else {
                         console.log(`Received DataTransfer from server:`, payload);
                         this.sendResponse(uniqueId, { status: "Accepted", data: "Server data successfully processed." });
                     }
@@ -1066,11 +1084,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     this.sendResponse(uniqueId, { status: "Accepted" });
                     break;
                 
-                case 'DataTransfer':
-                    console.log(`Received DataTransfer from server:`, payload);
-                    this.sendResponse(uniqueId, { status: "Accepted", data: "Server data successfully processed." });
-                    break;
-                
                 default:
                      this.sendResponse(uniqueId, { status: "Rejected" });
             }
@@ -1079,43 +1092,49 @@ document.addEventListener('DOMContentLoaded', () => {
         restoreSession(state) {
             console.log("Restoring UI state:", state);
             
-            // Cập nhật dữ liệu nội bộ
             this.transactionId = state.transactionId;
             this.meterValue = state.energy || 0;
             this.selectedChargeSpeed = state.chargeSpeed || 'normal';
             this.currentPowerLevel = parseInt(state.soc || 26);
-            
-            // Cập nhật hiển thị cơ bản
+            this.targetPowerLevel = 100;
+
+            const speedConfig = this.chargeSpeedOptions[this.selectedChargeSpeed];
+            if (speedConfig) {
+                this.CHARGING_POWER = speedConfig.power;
+                this.PRICE_PER_KWH = speedConfig.price;
+            }
+
             this.dom.energyValue.textContent = `${(this.meterValue / 1000).toFixed(2)} kWh`;
             
-            // Cập nhật trạng thái kết nối (Plug/Ready)
             this.isPluggedIn = true;
             this.isEvReady = true;
             this.dom.plugStatusBtn.classList.add('active');
             this.dom.plugStatusText.textContent = 'Plugged In';
             this.dom.evStatusBtn.classList.add('active');
+            this.dom.plugStatusBtn.disabled = true;
+            this.dom.evStatusBtn.disabled = true;
             
-            // Cập nhật UI trạng thái sạc (Charging/Finishing)
-            if (state.status === 'Charging') {
+            if (this.dom.paymentSection) this.dom.paymentSection.style.display = 'none';
+            if (this.dom.paymentMethodSection) this.dom.paymentMethodSection.style.display = 'none';
+            
+            if (state.status === 'Charging' || state.status === 'SuspendedEV' || state.status === 'SuspendedEVSE') {
                  this.updateStatusUI('Charging');
                  this.showChargingProgress();
                  
-                 // Cập nhật ngay lập tức các thanh tiến trình
                  this.dom.chargingPercentage.innerHTML = `${Math.floor(this.currentPowerLevel)}% → <span class="charging-target">100%</span>`;
                  this.dom.progressBarFill.style.width = `${this.currentPowerLevel}%`;
                  if (state.timeRemaining) {
                      this.dom.timeRemaining.textContent = state.timeRemaining;
                  }
 
+                 this.startSendingMeterValues(this.transactionId);
+
             } else if (state.status === 'Finishing') {
                  this.updateStatusUI('Finishing');
-            } else if (state.status === 'Preparing') {
-                 this.updateStatusUI('Preparing');
             }
         }
 
         startChargingProcess(idTag) {
-            // Send charging speed to server via DataTransfer before starting
             this.sendRequest("DataTransfer", {
                 vendorId: "ChargingSpeed",
                 messageId: "SpeedSelection",
@@ -1209,36 +1228,30 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         startSendingMeterValues(txId) {
-            this.meterValue = 0;
             if (this.meterValueIntervalId) clearInterval(this.meterValueIntervalId);
             this.meterValueIntervalId = setInterval(() => {
-                // Calculate power and energy based on selected charging speed
-                const powerKw = this.CHARGING_POWER; // 7.2, 14.4, or 21.6 kW
-                const powerWatts = powerKw * 1000;
-                const intervalSeconds = 5;
-                // Energy (Wh) = Power (W) × Time (h) = Power (W) × seconds / 3600
-                const energyIncrement = (powerWatts * intervalSeconds) / 3600;
+                // --- SỬA ĐỔI QUAN TRỌNG ---
+                // App KHÔNG TỰ TÍNH TOÁN CỘNG DỒN NỮA
+                // Chỉ cập nhật hiển thị công suất để tạo hiệu ứng "đang hoạt động"
+                // Giá trị này sẽ được cập nhật bởi gói tin 'SyncState' từ Server
+                const powerKw = this.CHARGING_POWER || 7.2;
                 
-                this.meterValue += energyIncrement;
-                // Add small noise to power display (±0.1kW)
+                // Hiển thị công suất (kW)
                 const displayPowerKw = powerKw + (Math.random() - 0.5) * 0.2;
-                
-                this.dom.energyValue.textContent = `${(this.meterValue / 1000).toFixed(2)} kWh`;
                 this.dom.powerValue.textContent = `${displayPowerKw.toFixed(1)} kW`;
-                this.sendRequest("MeterValues", {
-                    connectorId: 1,
-                    transactionId: txId,
-                    meterValue: [{ timestamp: new Date().toISOString(), sampledValue: [{ value: this.meterValue.toFixed(1), unit: "Wh" }] }]
-                });
                 
-                // Update charging progress
-                this.updateChargingProgress();
+                // (Tùy chọn) Gửi MeterValues để giữ kết nối với Server
+                // Nhưng KHÔNG được cộng dồn this.meterValue += ...
+                // this.sendRequest("MeterValues", {
+                //     connectorId: 1,
+                //     transactionId: txId,
+                //     meterValue: [{ timestamp: new Date().toISOString(), sampledValue: [{ value: this.meterValue.toFixed(1), unit: "Wh" }] }]
+                // });
             }, 5000);
         }
         
         stopSendingMeterValues() {
             clearInterval(this.meterValueIntervalId);
-            this.meterValue = 0;
             this.dom.energyValue.textContent = '0.00 kWh';
             this.dom.powerValue.textContent = '0.0 kW';
         }
