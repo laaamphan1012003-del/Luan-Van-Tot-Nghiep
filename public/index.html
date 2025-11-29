@@ -10,29 +10,36 @@
 <body>
     <div class="app-container">
         <!-- SIDEBAR BÊN TRÁI -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="admin-sidebar">
             <div class="sidebar-header">
-                <h2><i class="fa-solid fa-bolt"></i> CSMS Admin</h2>
+                <h2><i class="fa-solid fa-bolt"></i> <span class="brand-text">CSMS Admin</span></h2>
             </div>
             <nav class="sidebar-nav">
+                <!-- Tab nội bộ -->
                 <a href="#" class="nav-link active" onclick="openTab('realtime-view', this)">
                     <div class="icon-container"><i class="fa-solid fa-chart-line"></i></div>
-                    <span>Real-time Status</span>
+                    <span class="link-text">Real-time Status</span>
                 </a>
                 <a href="#" class="nav-link" onclick="openTab('database-view', this)">
                     <div class="icon-container"><i class="fa-solid fa-database"></i></div>
-                    <span>Charging History</span>
+                    <span class="link-text">Charging History</span>
                 </a>
+                
             </nav>
         </aside>
 
         <!-- KHU VỰC NỘI DUNG BÊN PHẢI -->
         <main class="main-content-area">
             <header class="content-header">
-                <h1>Overview</h1>
+                <div class="header-left">
+                    <button id="sidebar-toggle" class="toggle-btn" title="Toggle Sidebar" aria-label="Toggle Sidebar Menu">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <h1>Overview</h1>
+                </div>
                 <div class="user-profile">
                     <span class="status-indicator online"></span>
-                    <i class="fa-solid fa-circle-user"></i> Admin System
+                    <i class="fa-solid fa-circle-user"></i> <span class="user-name">Admin System</span>
                 </div>
             </header>
 
@@ -62,7 +69,7 @@
             </div>
 
             <!-- View 2: Database History -->
-            <div id="database-view" class="tab-content" style="display: none;">
+            <div id="database-view" class="tab-content">
                 <section class="sql-section global-log-section">
                     <div class="log-header">
                         <h2><i class="fa-solid fa-list"></i> Transaction History</h2>
@@ -71,15 +78,15 @@
                         <div class="search-bar-container">
                             <div class="search-input-group">
                                 <i class="fa-solid fa-hashtag"></i>
-                                <input type="text" id="search-tx-id" placeholder="Tx ID...">
+                                <input type="text" id="search-tx-id" placeholder="Tx ID..." aria-label="Filter by Transaction ID">
                             </div>
                             <div class="search-input-group">
                                 <i class="fa-solid fa-charging-station"></i>
-                                <input type="text" id="search-cp-id" placeholder="Charge Point...">
+                                <input type="text" id="search-cp-id" placeholder="Charge Point..." aria-label="Filter by Charge Point ID">
                             </div>
                             <div class="search-input-group">
                                 <i class="fa-solid fa-calendar"></i>
-                                <input type="date" id="search-date">
+                                <input type="date" id="search-date" aria-label="Filter by Date">
                             </div>
                             <button onclick="loadSqlData()" class="refresh-btn"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
                         </div>
@@ -97,7 +104,7 @@
                                 </tr>
                             </thead>
                             <tbody id="sql-table-body">
-                                <tr><td colspan="6" style="text-align:center">Click Refresh to load data</td></tr>
+                                <tr><td colspan="6" class="table-message info">Click Refresh to load data</td></tr>
                             </tbody>
                         </table>
                     </div>

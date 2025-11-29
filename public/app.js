@@ -1,29 +1,33 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // =========================================================================
+    //Sidebar toggle
+    const sidebarToggleBtn = document.getElementById('sidebar-toggle');
+    const sidebar = document.getElementById('admin-sidebar');
+    
+    if (sidebarToggleBtn && sidebar) {
+        sidebarToggleBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+        });
+    }
+
     // KHAI BÁO BIẾN TOÀN CỤC & CẤU HÌNH
-    // =========================================================================
     const chargersContainer = document.getElementById('chargers-container');
     const globalLogBody = document.getElementById('global-log-body');
     const MAX_LOG_ROWS = 100;
 
     // Mapping từ tốc độ sạc sang số pha (Load) hoạt động
-    // Normal = Load 1, Fast = Load 1+2, Lightning = Load 1+2+3
     const SPEED_TO_LOADS = {
         'normal': [true, false, false],     // Load 1 only
         'fast': [true, true, false],        // Load 1 + 2
         'lightning': [true, true, true]     // Load 1 + 2 + 3
     };
 
-    // WebSocket kết nối tới Server
     let ws; 
     
-    // Map lưu trữ các đối tượng ChargePointCard để quản lý độc lập
     const chargePointCards = new Map();
     
-    // Cache dữ liệu SQL để lọc nhanh
     let currentSqlData = [];
 
-    // Kiểm tra xem các phần tử cần thiết có tồn tại không
+    
     if (!chargersContainer) {
         console.error('Error: Element with id "chargers-container" not found!');
         return;
@@ -39,10 +43,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.openTab = function(viewId, elem) {
         document.querySelectorAll('.tab-content').forEach(content => {
-            content.style.display = 'none';
+            content.classList.remove('active');
+            content.style.display = '';
         });
 
-        document.querySelectorAll('.nav-link').forEach(link => {
+        document.querySelectorAll('.sidebar-nav .nav-link').forEach(link => {
             link.classList.remove('active');
         });
     
@@ -67,8 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const tbody = document.getElementById('sql-table-body');
         if (!tbody) return;
         
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 20px;"><i class="fa-solid fa-spinner fa-spin"></i> Loading data...</td></tr>';
-    
+        tbody.innerHTML = '<tr><td colspan="6" class="table-message loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading data...</td></tr>';
         try {
             const response = await fetch('/api/history');
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);

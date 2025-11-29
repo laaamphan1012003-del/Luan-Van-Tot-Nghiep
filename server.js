@@ -15,6 +15,15 @@ const {
     NodeClass
 } = require("node-opcua");
 
+//---Cấu hình thông số ban đầu---/
+const BATTERY_CAPACITY = 42; // kWh
+const CHARGING_SPEEDS = {
+    'normal': 7.2,
+    'fast': 14.4,
+    'lightning': 21.6
+};
+const DEFAULT_START_SOC = 26;
+
 // --- BỘ QUẢN LÝ TRẠNG THÁI ---
 const clients = {
     chargePoints: new Map(),
@@ -33,6 +42,16 @@ function broadcastToDashboards(message) {
             dashboard.send(serializedMessage);
         }
     });
+}
+
+// Hàm helper format thời gian (HH:mm:ss)
+function formatTimeRemaining(hours) {
+    if (!isFinite(hours) || hours < 0) return "--:--:--";
+    const totalSeconds = Math.floor(hours * 3600);
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
 // Hàm helper để cập nhật giá trị 1 tag OPC UA
@@ -345,7 +364,6 @@ const server = http.createServer(async (req, res) => {
     // 3. Xử lý file tĩnh (Static Files)
     let filePath = path.join(__dirname, 'public', req.url === '/' ? 'index.html' : req.url.split('?')[0]);
     
-    // Fix lỗi EISDIR: Nếu đường dẫn là thư mục, tự động thêm index.html
     if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
         filePath = path.join(filePath, 'index.html');
     }
@@ -353,7 +371,6 @@ const server = http.createServer(async (req, res) => {
     fs.readFile(filePath, (err, content) => {
         if (err) { 
             if(err.code == 'ENOENT') {
-                // SPA Fallback (cho React/Vue router nếu dùng, ở đây dùng cho an toàn)
                 fs.readFile(path.join(__dirname, 'public', 'index.html'), (err, indexContent) => {
                      if(err) { res.writeHead(404); res.end('Not Found'); }
                      else { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(indexContent); }
@@ -452,55 +469,84 @@ wss.on('connection', async (ws, req) => {
         });
 
     } else { // Kết nối từ trạm sạc
-        const chargePointId = id;
+       const chargePointId = id;
         
-        if (opcUaCreationLocks.has(chargePointId)) {
-            console.warn(`[Master] Từ chối kết nối ${chargePointId} do đang tạo (race condition).`);
-            ws.terminate();
-            return;
-        }
+        if (opcUaCreationLocks.has(chargePointId)) { ws.terminate(); return; }
 
-        if (clients.chargePoints.has(chargePointId)) {
-            console.warn(`[Master] Trạm ${chargePointId} kết nối đè. Đang dọn dẹp kết nối cũ...`);
-            const oldCp = clients.chargePoints.get(chargePointId);
-            
-            if (oldCp.ws) {
-                oldCp.ws.terminate(); 
-            }
-            if (oldCp.python) {
-                oldCp.python.kill();
-            }
-        }
-            
-        console.log(`[Master] Spawning Python handler for '${chargePointId}'...`);
-        const pythonHandler = spawn('python', ['OCPP_handler.py']);
+        // --- SỬA: Kiểm tra kết nối cũ để Khôi phục (Reconnect) ---
+        let existingCp = clients.chargePoints.get(chargePointId);
+        let pythonHandler;
+        let chargePointState;
+        let opcuaNodes;
+        let isReconnection = false;
 
-        const chargePointState = { id: chargePointId, vendor: '', model: '', status: 'Connecting', transactionId: null, energy: 0, chargeSpeed: null };
+        const activeStatuses = ['Preparing', 'Charging', 'Finishing', 'SuspendedEV', 'SuspendedEVSE'];
         
-        opcUaCreationLocks.add(chargePointId);
-        const opcuaNodes = createOpcUaNodesForChargePoint(chargePointId);
+        if (existingCp && activeStatuses.includes(existingCp.state.status)) {
+            console.log(`[Master] ${chargePointId} đang kết nối lại vào phiên sạc cũ (Status: ${existingCp.state.status}).`);
+            isReconnection = true;
+            
+            // Dọn dẹp socket cũ nếu còn treo
+            if (existingCp.ws) {
+                try { existingCp.ws.terminate(); } catch(e){}
+            }
 
-        opcUaCreationLocks.delete(chargePointId);
+            // Tái sử dụng state và process cũ
+            chargePointState = existingCp.state;
+            pythonHandler = existingCp.python;
+            opcuaNodes = existingCp.opcuaNodes;
 
-        clients.chargePoints.set(chargePointId, { 
-            ws: ws, 
-            state: chargePointState, 
-            python: pythonHandler, 
-            opcuaNodes: opcuaNodes
-        });
-      
-        console.log(`[Master] Client '${chargePointId}' đã kết nối.`);
-        broadcastToDashboards({ type: 'connect', id: chargePointId, state: chargePointState });
-    
-        // Ghi nhận kết nối vào Database
-        db.updateChargePoint(chargePointId, '', '');
-        db.recordHeartbeat(chargePointId);
-        db.updateChargePointStatus(chargePointId, 'Available');
+            // Xóa listeners cũ của Python process để tránh gửi data vào socket chết
+            if (pythonHandler) {
+                pythonHandler.stdout.removeAllListeners('data');
+                pythonHandler.removeAllListeners('close');
+                pythonHandler.stderr.removeAllListeners('data');
+            }
+
+            // Cập nhật socket mới vào map
+            existingCp.ws = ws;
+            
+            // Báo ngay cho Dashboard trạng thái hiện tại
+            db.recordHeartbeat(chargePointId);
+            broadcastToDashboards({ type: 'connect', id: chargePointId, state: chargePointState });
+
+        } else {
+            if (existingCp) {
+                if (existingCp.python) existingCp.python.kill();
+                clients.chargePoints.delete(chargePointId);
+            }
+            
+            console.log(`[Master] Spawning Python handler for '${chargePointId}'...`);
+            pythonHandler = spawn('python', ['OCPP_handler.py']);
+            
+            chargePointState = { 
+                id: chargePointId, 
+                vendor: '', model: '', status: 'Connecting', 
+                transactionId: null, 
+                energy: 0, 
+                chargeSpeed: 'normal',
+                soc: DEFAULT_START_SOC,
+                timeRemaining: '--:--:--',
+                lastSimTime: Date.now()
+            };
+            
+            opcUaCreationLocks.add(chargePointId);
+            opcuaNodes = createOpcUaNodesForChargePoint(chargePointId);
+            opcUaCreationLocks.delete(chargePointId);
+
+            clients.chargePoints.set(chargePointId, { 
+                ws: ws, state: chargePointState, python: pythonHandler, opcuaNodes: opcuaNodes
+            });
+        
+            broadcastToDashboards({ type: 'connect', id: chargePointId, state: chargePointState });
+            db.updateChargePoint(chargePointId, '', '');
+            db.recordHeartbeat(chargePointId);
+            db.updateChargePointStatus(chargePointId, 'Available');
+        };
 
         ws.on('message', (message) => {
             const currentCp = clients.chargePoints.get(chargePointId);
                 if (!currentCp || currentCp.ws !== ws) {
-                // Message này đến từ 1 socket cũ đã bị "đè". Bỏ qua.
                 return; 
             }
             const messageString = message.toString();
@@ -516,7 +562,9 @@ wss.on('connection', async (ws, req) => {
                 if (action === 'BootNotification') {
                     chargePointState.vendor = payload.chargePointVendor;
                     chargePointState.model = payload.chargePointModel;
-                    chargePointState.status = 'Available';
+                    if (!isReconnection) {
+                        chargePointState.status = 'Available';
+                    }
                     
                     // Cập nhật thông tin vào DB
                     db.updateChargePoint(chargePointId, chargePointState.vendor, chargePointState.model);
@@ -525,6 +573,24 @@ wss.on('connection', async (ws, req) => {
                     updateOpcuaTag(chargePointId, "Vendor", chargePointState.vendor);
                     updateOpcuaTag(chargePointId, "Model", chargePointState.model);
                     updateOpcuaTag(chargePointId, "Status", chargePointState.status);
+
+                    if (isReconnection && chargePointState.transactionId) {
+                        console.log(`[Master] Gửi lệnh RestoreSession cho ${chargePointId}`);
+                        const restoreMsg = [2, uuidv4(), "DataTransfer", {
+                            vendorId: "OCPP_Simulator",
+                            messageId: "RestoreSession",
+                            data: JSON.stringify({
+                                status: chargePointState.status,
+                                transactionId: chargePointState.transactionId,
+                                energy: chargePointState.energy,
+                                soc: chargePointState.soc,
+                                timeRemaining: chargePointState.timeRemaining,
+                                chargeSpeed: chargePointState.chargeSpeed
+                            })
+                        }];
+                        ws.send(JSON.stringify(restoreMsg));
+                    }
+
                 } else if (action === 'StatusNotification') {
                     chargePointState.status = payload.status;
                     broadcastToDashboards({ type: 'status', id: chargePointId, status: chargePointState.status });
@@ -540,20 +606,18 @@ wss.on('connection', async (ws, req) => {
 
                     chargePointState.transactionId = null;
                     chargePointState.energy = 0; // Reset energy khi dừng
+                    chargePointState.soc = DEFAULT_START_SOC; // Reset SOC
+                    chargePointState.timeRemaining = '--:--:--';
                     chargePointState.chargeSpeed = null; // Reset charge speed khi dừng
                     broadcastToDashboards({ type: 'transactionStop', id: chargePointId, transactionId: null });
-                    broadcastToDashboards({ type: 'meterValue', id: chargePointId, value: 0 }); // Gửi cập nhật energy về 0
+                    broadcastToDashboards({ type: 'meterValue', id: chargePointId, value: 0, soc: DEFAULT_START_SOC, timeRemaining: '--;--;--' }); // Gửi cập nhật energy về 0
                     broadcastToDashboards({ type: 'speedUpdate', id: chargePointId, speed: null }); // Reset speed trên dashboard
                     updateOpcuaTag(chargePointId, "TransactionID", 0); // Đặt về 0 hoặc null
                     updateOpcuaTag(chargePointId, "Energy_Wh", 0);
                 }
                 else if (action === 'MeterValues') {
-                    const latestMeterValue = payload.meterValue[payload.meterValue.length - 1];
-                    const energyValue = latestMeterValue.sampledValue[0].value;
-                    chargePointState.energy = energyValue;
-                    broadcastToDashboards({ type: 'meterValue', id: chargePointId, value: energyValue });
-                    updateOpcuaTag(chargePointId, "Energy_Wh", parseFloat(energyValue) || 0);
                 }
+
                 // Handle DataTransfer for charging speed from mobile app
                 else if (action === 'DataTransfer' && payload.vendorId === 'ChargingSpeed') {
                     const speed = payload.data; // 'normal', 'fast', or 'lightning'
@@ -573,8 +637,7 @@ wss.on('connection', async (ws, req) => {
         let pythonBuffer = '';
         pythonHandler.stdout.on('data', (data) => {
             const currentCp = clients.chargePoints.get(chargePointId);
-            if (!currentCp || currentCp.ws !== ws) {
-                // Python handler này thuộc về 1 socket cũ. Bỏ qua.
+            if (!currentCp || currentCp.ws !== ws || ws.readyState !== WebSocket.OPEN) {
                 return;
             }
             pythonBuffer += data.toString();
@@ -597,12 +660,12 @@ wss.on('connection', async (ws, req) => {
                              if (chargePointState) {
                                  chargePointState.transactionId = payload.transactionId;
                                  chargePointState.energy = 0; // Reset energy khi bắt đầu
+                                 chargePointState.soc = DEFAULT_START_SOC; // Reset về 26% khi bắt đầu
+                                 chargePointState.timeRemaining = '--:--:--';
                                  
                                  // Ghi vào DB (Start Transaction)
                                  db.startTransaction(chargePointId, payload.transactionId, "UNKNOWN_TAG", 0);
-
                                  broadcastToDashboards({ type: 'transactionStart', id: chargePointId, transactionId: chargePointState.transactionId });
-                        
                                  updateOpcuaTag(chargePointId, "TransactionID", payload.transactionId);
                                  updateOpcuaTag(chargePointId, "Energy_Wh", 0);
                             }
@@ -634,27 +697,67 @@ wss.on('connection', async (ws, req) => {
             const cp = clients.chargePoints.get(chargePointId);
 
             if (cp && cp.ws === ws) {
-                if (cp.python) {
-                    cp.python.kill();
-                }
-
-                if (cp.opcuaNodes) {
-                    console.log(`[OPC UA] Cập nhật trạng thái 'Disconnected' cho ${chargePointId}`);
+                const status = cp.state.status;
+                if (['Preparing', 'Charging', 'Finishing'].includes(status)) {
+                    console.log(`[Master] ${chargePointId} ngắt kết nối tạm thời (Session Active). Giữ state.`);
+                    cp.ws = null; 
+                    broadcastToDashboards({ type: 'disconnect', id: chargePointId, isTemporary: true });
                     updateOpcuaTag(chargePointId, "Status", "Disconnected");
+                } else {
+                    if (cp.python) cp.python.kill();
+                    clients.chargePoints.delete(chargePointId);
+                    db.updateChargePointStatus(chargePointId, 'Unavailable');
+                    broadcastToDashboards({ type: 'disconnect', id: chargePointId });
                 }
-
-                clients.chargePoints.delete(chargePointId);
-                console.log(`[Master] Client '${chargePointId}' đã ngắt kết nối.`);
-                db.updateChargePointStatus(chargePointId, 'Unavailable');
-                broadcastToDashboards({ type: 'disconnect', id: chargePointId });
-            } else {
-                // Đây là 1 socket cũ, nó đã bị "đè" và dọn dẹp rồi.
-                console.log(`[Master] Socket cũ của ${chargePointId} đã được dọn dẹp.`);
             }
         });
     }
 });
+setInterval(() => {
+    const now = Date.now();
+    
+    clients.chargePoints.forEach((cp) => {
+        const state = cp.state;
+        if (!state || state.status !== 'Charging') {
+            state.lastSimTime = now; // Reset time delta
+            return;
+        }
 
+        // Tính thời gian trôi qua (giờ)
+        const lastTime = state.lastSimTime || now;
+        const deltaTimeHours = (now - lastTime) / 1000 / 3600;
+        state.lastSimTime = now;
+        // Lấy công suất sạc (kW)
+        const speed = state.chargeSpeed || 'normal';
+        const powerKw = CHARGING_SPEEDS[speed] || 7.2;
+
+        // Tính năng lượng cộng thêm (Wh)
+        const addedWh = powerKw * 1000 * deltaTimeHours;
+        state.energy = (state.energy || 0) + addedWh;
+
+        // Tính SOC & Time Remaining
+        const addedSoc = (state.energy / 1000 / BATTERY_CAPACITY) * 100;
+        let currentSoc = DEFAULT_START_SOC + addedSoc;
+        if (currentSoc > 100) currentSoc = 100;
+        state.soc = currentSoc.toFixed(0);
+
+        const energyNeededKwh = ((100 - currentSoc) / 100) * BATTERY_CAPACITY;
+        // Tránh chia cho 0
+        const timeRemainingHours = powerKw > 0 ? energyNeededKwh / powerKw : 0;
+        state.timeRemaining = formatTimeRemaining(timeRemainingHours);
+
+        // Broadcast cập nhật xuống Dashboard và SCADA
+        broadcastToDashboards({ 
+            type: 'meterValue', 
+            id: state.id, 
+            value: state.energy, 
+            soc: state.soc, 
+            timeRemaining: state.timeRemaining
+        });
+        
+        updateOpcuaTag(state.id, "Energy_Wh", state.energy);
+    });
+}, 1000);
 function monitorOpcUaWrites(chargePointId, opcuaNodes) {
     
     // Theo dõi lệnh START

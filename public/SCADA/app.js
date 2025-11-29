@@ -13,6 +13,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const qrcodeElement = document.getElementById('qrcode');
     const editStationBtn = document.getElementById('edit-station-btn');
     const deleteStationBtn = document.getElementById('delete-station-btn');
+    const detailEnergyContainer = document.getElementById('detail-energy-container');
+    const detailEnergyValue = document.getElementById('detail-energy-value');
+    const chargingProgressContainer = document.getElementById('charging-progress-container');
+    const timeRemainText = document.getElementById('time-remain-text');
 
     // List View Elements
     const addStationBtn = document.getElementById('add-station-btn');
@@ -95,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
         detailStationMeta.textContent = `${station.vendor || 'N/A'} / ${station.model || 'N/A'}`;
         
         // Call the new update function
-        updateDetailViewStatus(station.status || 'Unavailable');
+        updateDetailViewStatus(station.status || 'Unavailable', station);
 
         // Generate QR Code
         if (qrcodeElement) {
@@ -116,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Function to update the detail view based on status
-    const updateDetailViewStatus = (status) => {
+    const updateDetailViewStatus = (status, stationData = {}) => {
         const safeStatus = status || 'Unavailable';
         // Update status tag
         detailStatusTag.textContent = safeStatus;
@@ -125,12 +129,45 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update connector details
         connectorDetails.innerHTML = `<h4>Connector 1</h4><p>Status: ${safeStatus}</p>`;
 
-        // Always show QR code regardless of status
-        qrCodeContainer.classList.remove('hidden');
+        //QR code change by Status
+        const busyStatuses = ['Preparing', 'Charging', 'Finishing'];
+        if (busyStatuses.includes(safeStatus)) {
+            qrCodeContainer.classList.add('hidden');
+        } else {
+            qrCodeContainer.classList.remove('hidden');
+        }
+
+        //Energy view
+        const rawEnergy = parseFloat(stationData.energy);
+        if (!isNaN(rawEnergy)) {
+            detailEnergyContainer.classList.remove('hidden');
+            const energyKwh = rawEnergy/ 1000;
+            detailEnergyValue.textContent = energyKwh.toFixed(2); 
+        } else {
+            if (!busyStatuses.includes(safeStatus)) {
+                 detailEnergyContainer.classList.add('hidden');
+            }
+        }
+
+        //Loading view and Time View
+        if (safeStatus === 'Charging') {
+            chargingProgressContainer.classList.remove('hidden');
+            if (stationData.timeRemaining) {
+                timeRemainText.textContent = `${stationData.timeRemaining} remaining`;
+            } else {
+                timeRemainText.textContent = "-- min remaining";
+            }
+            const progressPercent = stationData.soc || 0; 
+            const progressBarFill = document.querySelector('.progress-bar-fill');
+            if (progressBarFill) {
+                progressBarFill.style.width = `${progressPercent}%`;
+            }
+        } else {
+            chargingProgressContainer.classList.add('hidden');
+        }
     };
 
     const updateStationList = (stationData) => {
-        // stationData có thể là mảng (fullStatus) hoặc object đơn (connect/update)
         const list = Array.isArray(stationData) ? stationData : [stationData];
         
         list.forEach(s => {
@@ -182,6 +219,29 @@ document.addEventListener('DOMContentLoaded', () => {
                         renderStationList();
                     }
                     break;
+                 case 'meterValue':
+                    const mSt = stations.get(data.id);
+                    if (mSt) {
+                        const isSessionActive = ['Charging', 'SuspendedEV', 'SuspendedEVSE', 'Finishing'].includes(mSt.status);
+                        if (isSessionActive || data.value === 0) {
+                            if (data.value !== undefined) mSt.energy = data.value;
+                            if (data.soc !== undefined) mSt.soc = data.soc;
+                            if (data.timeRemaining !== undefined) mSt.timeRemaining = data.timeRemaining;
+                        }
+                    }
+                    break;
+            }
+
+                if (currentDetailId) {
+                    if ((data.id && data.id === currentDetailId) || 
+                        (data.chargePoints && data.chargePoints.find(cp => cp.id === currentDetailId))) {
+                
+                            const currentStationData = stations.get(currentDetailId);
+                            if (currentStationData) {
+    
+                            updateDetailViewStatus(currentStationData.status, currentStationData);
+                            }
+                }
             }
         };
 

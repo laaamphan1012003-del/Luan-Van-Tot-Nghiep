@@ -209,3 +209,63 @@ body {
     color: white;
     border-color: var(--primary-color);
 }
+
+/* --- New Additions for Energy & Progress --- */
+.station-info-card-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+/* --- CSS Mới cho Progress Bar & Energy --- */
+
+/* Class ẩn phần tử */
+.hidden {
+    display: none !important;
+}
+
+/* Container bao ngoài */
+.station-info-card-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+/* Khung thanh loading */
+.charging-progress {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 10px;
+    border: 1px solid #e9ecef;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.progress-info {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 0.95em;
+}
+
+/* Nền xám của thanh loading */
+.progress-bar-bg {
+    width: 100%;
+    height: 12px;
+    background-color: #e0e0e0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+/* Phần màu xanh chạy bên trong */
+.progress-bar-fill {
+    height: 100%;
+    background-color: #28a745; /* Màu xanh lá */
+    width: 0%; /* Giá trị này sẽ được JS cập nhật */
+    transition: width 0.5s ease-in-out; /* Hiệu ứng mượt khi thay đổi % */
+    
+    /* Hiệu ứng sọc chéo (tùy chọn) */
+    background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
+    background-size: 1rem 1rem;
+}

@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let chargePoint = null;
     let html5QrCode = null;
     let isScanning = false;
+    let isReconnecting = false;
 
     // --- QR CODE SCANNER ---
     const startScanner = async () => {
@@ -197,22 +198,8 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    // Chuyển tab về màn hình Connection (để người dùng kết nối lại)
-    const targetViewId = 'connection-view'; 
-
-    // Cập nhật Tab hiển thị
-    views.forEach(view => {
-        view.classList.toggle('active', view.id === targetViewId);
-    });
-
-    // Cập nhật Bottom Navigation (Active icon)
-    navItems.forEach(item => {
-        if (item.dataset.view === targetViewId) {
-            item.classList.add('active');
-        } else {
-            item.classList.remove('active');
-        }
-    });
+    // Chuyển tab về màn hình Connection 
+    switchView('connection-view');
 
     // Reset biến dữ liệu
     chargePoint = null; 
@@ -233,13 +220,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (websocket && websocket.readyState === WebSocket.OPEN) {
+             isReconnecting = True;
              websocket.close();
              console.log("Closing existing connection before reconnecting...");
         }
 
         // Chuyển sang View Status
-        views.forEach(view => view.classList.remove('active'));
-        document.getElementById('status-view').classList.add('active');
+        switchView('status-view');
 
         const fullUrl = `${backendUrl}/${chargeboxId}`;
         statusBanner.style.display = 'block';
@@ -252,6 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         websocket.onopen = () => {
             console.log('Connected');
+            isReconnecting = false;
             statusBanner.classList.add('success');
             statusBanner.textContent = `Successfully connected to ${chargeboxId}.`;
             chargePoint = new ChargePointStatus(chargeboxId, sendRequest, sendResponse, (isCharging) => {
@@ -288,10 +276,19 @@ document.addEventListener('DOMContentLoaded', () => {
         websocket.onerror = () => {
             statusBanner.classList.add('error');
             statusBanner.textContent = `Error while connecting to ${fullUrl}.`;
+            isReconnecting = false; 
         };
         
         websocket.onclose = () => {
              if (chargePoint) {
+                if (websocket && event.target !== websocket) {
+                 console.log("Ignored onclose event from old WebSocket.");
+                 return;
+             }
+                if (websocket && event.target !== websocket) {
+                 console.log("Ignored onclose event from old WebSocket.");
+                 return;
+             }
                 switchView('connection-view');
                 statusBanner.style.display = 'block';
                 statusBanner.classList.add('error');
@@ -1023,7 +1020,22 @@ document.addEventListener('DOMContentLoaded', () => {
                         this.sendResponse(uniqueId, { status: "Rejected" });
                     }
                     break;
-                
+                case 'DataTransfer':
+                    if (payload.vendorId === 'OCPP_Simulator' && payload.messageId === 'RestoreSession') {
+                        console.log("Received RestoreSession request:", payload.data);
+                        try {
+                            const sessionState = JSON.parse(payload.data);
+                            this.restoreSession(sessionState);
+                            this.sendResponse(uniqueId, { status: "Accepted" });
+                        } catch (e) {
+                            console.error("Failed to restore session:", e);
+                            this.sendResponse(uniqueId, { status: "Rejected" });
+                        }
+                    } else {
+                        console.log(`Received DataTransfer from server:`, payload);
+                        this.sendResponse(uniqueId, { status: "Accepted", data: "Server data successfully processed." });
+                    }
+                    break;
                 case 'GetConfiguration':
                     const requestedKeys = payload.key || Object.keys(this.configuration);
                     const configurationKey = [];
@@ -1061,6 +1073,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 default:
                      this.sendResponse(uniqueId, { status: "Rejected" });
+            }
+        }
+
+        restoreSession(state) {
+            console.log("Restoring UI state:", state);
+            
+            // Cập nhật dữ liệu nội bộ
+            this.transactionId = state.transactionId;
+            this.meterValue = state.energy || 0;
+            this.selectedChargeSpeed = state.chargeSpeed || 'normal';
+            this.currentPowerLevel = parseInt(state.soc || 26);
+            
+            // Cập nhật hiển thị cơ bản
+            this.dom.energyValue.textContent = `${(this.meterValue / 1000).toFixed(2)} kWh`;
+            
+            // Cập nhật trạng thái kết nối (Plug/Ready)
+            this.isPluggedIn = true;
+            this.isEvReady = true;
+            this.dom.plugStatusBtn.classList.add('active');
+            this.dom.plugStatusText.textContent = 'Plugged In';
+            this.dom.evStatusBtn.classList.add('active');
+            
+            // Cập nhật UI trạng thái sạc (Charging/Finishing)
+            if (state.status === 'Charging') {
+                 this.updateStatusUI('Charging');
+                 this.showChargingProgress();
+                 
+                 // Cập nhật ngay lập tức các thanh tiến trình
+                 this.dom.chargingPercentage.innerHTML = `${Math.floor(this.currentPowerLevel)}% → <span class="charging-target">100%</span>`;
+                 this.dom.progressBarFill.style.width = `${this.currentPowerLevel}%`;
+                 if (state.timeRemaining) {
+                     this.dom.timeRemaining.textContent = state.timeRemaining;
+                 }
+
+            } else if (state.status === 'Finishing') {
+                 this.updateStatusUI('Finishing');
+            } else if (state.status === 'Preparing') {
+                 this.updateStatusUI('Preparing');
             }
         }
 
