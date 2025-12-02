@@ -650,7 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         rect.classList.remove('active');
                     }
-                    this.calculateElectricalParameters();
+                    // Đã loại bỏ việc tính toán tại đây vì server sẽ đảm nhiệm
                 });
             });
 
@@ -726,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 console.log(`[Dashboard] Auto-set loads for ${this.id}: Speed=${speed}, Phases=${this.activePhases}`);
-                this.calculateElectricalParameters();
+                // Bỏ gọi calculateElectricalParameters
             } else {
                 // Reset về chế độ manual khi speed = null
                 this.autoLoadMode = false;
@@ -771,7 +771,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             this.updateActionButton();
-            this.calculateElectricalParameters();
+            // Bỏ gọi calculateElectricalParameters
         }
 
         updateTransaction(transactionId) {
@@ -802,112 +802,38 @@ document.addEventListener('DOMContentLoaded', () => {
             this.dom.energyInfo.textContent = `${kwh} kWh`;
         }
 
-        // --- LOGIC GIẢ LẬP TỐC ĐỘ SẠC ---
         startSimulation() {
-            if (this.simulationInterval) return; 
-            this.lastSimTime = Date.now();
-            this.simulationInterval = setInterval(() => {
-                this.runSimulationStep();
-            }, 1000); // Cập nhật mỗi giây
+            // No-op: Logic đã chuyển về server
         }
 
         stopSimulation() {
-            if (this.simulationInterval) {
-                clearInterval(this.simulationInterval);
-                this.simulationInterval = null;
-            }
+            // No-op
         }
 
         runSimulationStep() {
-            if (this.state.status !== 'Charging') return;
-
-            const now = Date.now();
-            const deltaTimeHours = (now - this.lastSimTime) / 1000 / 3600; 
-            this.lastSimTime = now;
-
-            const voltage = 230;
-            // Cố định 32A để đạt ~7.2kW mỗi pha
-            const currentPerPhase = 32; 
-            const pf = 0.98;
-            const activeCount = this.activePhases.filter(p => p).length;
-            
-            // Công suất tổng (kW) tăng theo số pha (1 pha=7.2kW, 3 pha=21.6kW)
-            const totalPowerKw = (voltage * currentPerPhase * pf * activeCount) / 1000;
-
-            const addedKwh = totalPowerKw * deltaTimeHours;
-            
-            const currentWh = parseFloat(this.state.energy) || 0;
-            this.state.energy = currentWh + (addedKwh * 1000);
-
-            // Hiển thị 4 số thập phân để thấy tốc độ tăng Energy khác biệt rõ ràng
-            const energyDisplay = (this.state.energy / 1000).toFixed(2); 
-            this.dom.energyInfo.textContent = `${energyDisplay} kWh`;
-            
-            this.calculateElectricalParameters(); 
+            // Đã chuyển về server
         }
         
-        calculateElectricalParameters() {
-            const voltageNoise = () => (Math.random() - 0.5) * 3; 
-            
-            let Va = 230 + voltageNoise();
-            let Vb = 230 + voltageNoise();
-            let Vc = 230 + voltageNoise();
-            
-            let Ia = 0, Ib = 0, Ic = 0;
-            let P_total = 0, Q_total = 0, PF = 0;
+        // --- HÀM HIỂN THỊ GIÁ TRỊ TỪ SERVER (SỬA LỖI) ---
+        renderElectricalParameters(params) {
+            if (!params) return;
 
-            if (this.state.status === 'Charging') {
-                 // 32A mỗi pha để đạt công suất theo bảng
-                 const BASE_CURRENT = 32; 
-                 const currentNoise = () => (Math.random() - 0.5) * 0.5;
+            // Truy cập đúng thuộc tính trong params, không dùng biến chưa định nghĩa
+            this.dom.vVal.textContent = `${params.v_avg} V`;
+            this.dom.vabVal.textContent = `${params.vab} V`;
+            this.dom.vbcVal.textContent = `${params.vbc} V`;
+            this.dom.vcaVal.textContent = `${params.vca} V`;
 
-                 if (this.activePhases[0]) Ia = BASE_CURRENT + currentNoise();
-                 if (this.activePhases[1]) Ib = BASE_CURRENT + currentNoise();
-                 if (this.activePhases[2]) Ic = BASE_CURRENT + currentNoise();
+            this.dom.iVal.textContent = `${params.i_sum} A`;
+            this.dom.iaVal.textContent = `${params.ia} A`;
+            this.dom.ibVal.textContent = `${params.ib} A`;
+            this.dom.icVal.textContent = `${params.ic} A`;
 
-                 const getPF = () => 0.98 + (Math.random() * 0.01);
-                 const PFa = this.activePhases[0] ? getPF() : 0;
-                 const PFb = this.activePhases[1] ? getPF() : 0;
-                 const PFc = this.activePhases[2] ? getPF() : 0;
+            this.dom.pVal.textContent = `${params.p_total} kW`;
+            this.dom.qVal.textContent = `${params.q_total} kVAR`;
+            this.dom.pfVal.textContent = `${params.pf}`;
 
-                 const Pa = (Va * Ia * PFa) / 1000;
-                 const Pb = (Vb * Ib * PFb) / 1000;
-                 const Pc = (Vc * Ic * PFc) / 1000;
-                 P_total = Pa + Pb + Pc;
-
-                 // Tính Q
-                 const Sa = (Va * Ia) / 1000;
-                 const Sb = (Vb * Ib) / 1000;
-                 const Sc = (Vc * Ic) / 1000;
-                 const Qa = Math.sqrt(Math.max(0, Sa*Sa - Pa*Pa));
-                 const Qb = Math.sqrt(Math.max(0, Sb*Sb - Pb*Pb));
-                 const Qc = Math.sqrt(Math.max(0, Sc*Sc - Pc*Pc));
-                 Q_total = Qa + Qb + Qc;
-
-                 const activeCount = this.activePhases.filter(p => p).length;
-                 if (activeCount > 0) PF = (PFa + PFb + PFc) / activeCount;
-            }
-
-            const Vab = Va * Math.sqrt(3);
-            const Vbc = Vb * Math.sqrt(3);
-            const Vca = Vc * Math.sqrt(3);
-            const V_avg = (Va + Vb + Vc) / 3;
-            const I_sum = Ia + Ib + Ic;
-
-            this.dom.vVal.textContent = `${V_avg.toFixed(1)} V`;
-            this.dom.vabVal.textContent = `${Vab.toFixed(1)} V`;
-            this.dom.vbcVal.textContent = `${Vbc.toFixed(1)} V`;
-            this.dom.vcaVal.textContent = `${Vca.toFixed(1)} V`;
-
-            this.dom.iVal.textContent = `${I_sum.toFixed(1)} A`;
-            this.dom.iaVal.textContent = `${Ia.toFixed(1)} A`;
-            this.dom.ibVal.textContent = `${Ib.toFixed(1)} A`;
-            this.dom.icVal.textContent = `${Ic.toFixed(1)} A`;
-
-            this.dom.pVal.textContent = `${P_total.toFixed(2)} kW`;
-            this.dom.qVal.textContent = `${Q_total.toFixed(2)} kVAR`;
-            this.dom.pfVal.textContent = `${PF.toFixed(2)}`;
-
+            // Logic cập nhật số kWh khi không sạc (để hiển thị con số cuối cùng)
             if (this.state.status !== 'Charging') {
                 const kwh = (this.state.energy || 0) / 1000;
                 this.dom.energyInfo.textContent = `${kwh.toFixed(2)} kWh`;
@@ -965,7 +891,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (type === 'status') card.updateStatus(data.status);
                 if (type === 'transactionStart') card.updateTransaction(data.transactionId);
                 if (type === 'transactionStop') card.updateTransaction(null);
-                if (type === 'meterValue') card.updateEnergy(data.value);
+                if (type === 'meterValue') {
+                    card.updateEnergy(data.value);
+                    if (data.electricalParams) {
+                        card.renderElectricalParameters(data.electricalParams);
+                    }
+                }
                 if (type === 'heartbeat') card.triggerHeartbeat();
                 if (type === 'speedUpdate') card.setActivePhasesBySpeed(data.speed);
 

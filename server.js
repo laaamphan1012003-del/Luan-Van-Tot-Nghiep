@@ -22,7 +22,14 @@ const CHARGING_SPEEDS = {
     'fast': 14.4,
     'lightning': 21.6
 };
-const DEFAULT_START_SOC = 26;
+ // Mapping tốc độ sạc sang số pha
+const SPEED_TO_PHASES_COUNT = {
+    'normal': 1,
+    'fast': 2,
+    'lightning': 3
+};
+
+const DEFAULT_START_SOC = randomIntNumber(10, 50); // Phần trăm SoC ban đầu khi bắt đầu phiên sạc
 
 // --- BỘ QUẢN LÝ TRẠNG THÁI ---
 const clients = {
@@ -33,6 +40,9 @@ const opcUaCreationLocks = new Set();
 
 let opcUaServer;
 let opcUaAddressSpace;
+
+function randomIntNumber(min, max){
+    return Math.floor(Math.random() * (max - min + 1)) + min;}
 
 // --- HÀM TRUYỀN TIN ---
 function broadcastToDashboards(message) {
@@ -52,6 +62,83 @@ function formatTimeRemaining(hours) {
     const m = Math.floor((totalSeconds % 3600) / 60);
     const s = totalSeconds % 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+// --- HÀM TÍNH TOÁN THÔNG SỐ ĐIỆN  ---
+function calculateServerElectricalParams(state) {
+    // Logic giả lập nhiễu điện áp và dòng điện 
+    const voltageNoise = () => (Math.random() - 0.5) * 3;
+    
+    let Va = 230 + voltageNoise();
+    let Vb = 230 + voltageNoise();
+    let Vc = 230 + voltageNoise();
+    
+    let Ia = 0, Ib = 0, Ic = 0;
+    let P_total = 0, Q_total = 0, PF = 0;
+
+    // Xác định số pha hoạt động dựa trên chargeSpeed hiện tại
+    const speed = state.chargeSpeed || 'normal';
+    const activePhaseCount = SPEED_TO_PHASES_COUNT[speed] || 1;
+    
+    // Mapping: normal -> Load 1, fast -> Load 1+2, lightning -> Load 1+2+3
+    const activePhases = [
+        activePhaseCount >= 1, // Phase A
+        activePhaseCount >= 2, // Phase B
+        activePhaseCount >= 3  // Phase C
+    ];
+
+    if (state.status === 'Charging') {
+            const BASE_CURRENT = 32; 
+            const currentNoise = () => (Math.random() - 0.5) * 0.5;
+
+            if (activePhases[0]) Ia = BASE_CURRENT + currentNoise();
+            if (activePhases[1]) Ib = BASE_CURRENT + currentNoise();
+            if (activePhases[2]) Ic = BASE_CURRENT + currentNoise();
+
+            const getPF = () => 0.98 + (Math.random() * 0.01);
+            const PFa = activePhases[0] ? getPF() : 0;
+            const PFb = activePhases[1] ? getPF() : 0;
+            const PFc = activePhases[2] ? getPF() : 0;
+
+            const Pa = (Va * Ia * PFa) / 1000;
+            const Pb = (Vb * Ib * PFb) / 1000;
+            const Pc = (Vc * Ic * PFc) / 1000;
+            P_total = Pa + Pb + Pc;
+
+            // Tính Q
+            const Sa = (Va * Ia) / 1000;
+            const Sb = (Vb * Ib) / 1000;
+            const Sc = (Vc * Ic) / 1000;
+            const Qa = Math.sqrt(Math.max(0, Sa*Sa - Pa*Pa));
+            const Qb = Math.sqrt(Math.max(0, Sb*Sb - Pb*Pb));
+            const Qc = Math.sqrt(Math.max(0, Sc*Sc - Pc*Pc));
+            Q_total = Qa + Qb + Qc;
+
+            if (activePhaseCount > 0) PF = (PFa + PFb + PFc) / activePhaseCount;
+    } else {
+        // Nếu không sạc, Reset dòng về 0 nhưng V vẫn có (đang nối lưới)
+        Ia = 0; Ib = 0; Ic = 0;
+    }
+
+    const Vab = Va * Math.sqrt(3);
+    const Vbc = Vb * Math.sqrt(3);
+    const Vca = Vc * Math.sqrt(3);
+    const V_avg = (Va + Vb + Vc) / 3;
+    const I_sum = Ia + Ib + Ic;
+
+    return {
+        v_avg: V_avg.toFixed(1),
+        vab: Vab.toFixed(1),
+        vbc: Vbc.toFixed(1),
+        vca: Vca.toFixed(1),
+        i_sum: I_sum.toFixed(1),
+        ia: Ia.toFixed(1),
+        ib: Ib.toFixed(1),
+        ic: Ic.toFixed(1),
+        p_total: P_total.toFixed(2),
+        q_total: Q_total.toFixed(2),
+        pf: PF.toFixed(2)
+    };
 }
 
 // Hàm helper để cập nhật giá trị 1 tag OPC UA
@@ -736,8 +823,17 @@ setInterval(() => {
     
     clients.chargePoints.forEach((cp) => {
         const state = cp.state;
+        const electricalParams = calculateServerElectricalParams(state);
         if (!state || state.status !== 'Charging') {
             if (state) state.lastSimTime = now;
+            broadcastToDashboards({ 
+                type: 'meterValue', 
+                id: state.id, 
+                value: state.energy, 
+                soc: state.soc, 
+                timeRemaining: state.timeRemaining,
+                electricalParams: electricalParams // <--- Thêm vào gói tin
+            });
             return;
         }
 
@@ -765,7 +861,8 @@ setInterval(() => {
             id: state.id, 
             value: state.energy, 
             soc: state.soc, 
-            timeRemaining: state.timeRemaining
+            timeRemaining: state.timeRemaining,
+            electricalParams: electricalParams // <--- Thêm vào gói tin
         });
         
         updateOpcuaTag(state.id, "Energy_Wh", state.energy);
