@@ -283,10 +283,26 @@ const server = http.createServer(async (req, res) => {
     // 1. API: Lấy lịch sử giao dịch
     if (apiBase === 'api' && resource === 'history' && req.method === 'GET') {
         try {
-            const data = await db.getRecentTransactions();
+            // Phân tích query parameters
+            const urlObj = new URL(req.url, `http://${req.headers.host}`);
+            const start = urlObj.searchParams.get('start');
+            const end = urlObj.searchParams.get('end');
+
+            let data;
+            if (start && end) {
+                // Format ngày cho MySQL: 'YYYY-MM-DD HH:mm:ss'
+                // Giả sử client gửi ISO string hoặc YYYY-MM-DD
+                const formatDate = (isoStr) => isoStr.replace('T', ' ').split('.')[0];
+                console.log(`[API] Fetching history from ${start} to ${end}`);
+                data = await db.getTransactionsByDate(formatDate(start), formatDate(end));
+            } else {
+                data = await db.getRecentTransactions();
+            }
+            
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(data));
         } catch (e) { 
+            console.error("[API] Error fetching history:", e);
             res.writeHead(500); res.end(JSON.stringify({error: e.message})); 
         }
         return;
@@ -780,8 +796,6 @@ setInterval(() => {
         }
     });
 }, 5000);
-
-// ...existing code...
 
 function monitorOpcUaWrites(chargePointId, opcuaNodes) {
     

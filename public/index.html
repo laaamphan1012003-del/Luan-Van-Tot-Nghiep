@@ -6,6 +6,8 @@
     <title>OCPP CSMS Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 </head>
 <body>
     <div class="app-container">
@@ -107,6 +109,61 @@
                                 <tr><td colspan="6" class="table-message info">Click Refresh to load data</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                </section>
+
+                <!-- KHU VỰC BIỂU ĐỒ THỐNG KÊ -->
+                <section class="charts-section" style="margin-top: 24px;">
+                    <div class="log-header" style="border-bottom: none; padding-bottom: 0;">
+                        <h2><i class="fa-solid fa-chart-pie"></i> Statistics</h2>
+                        
+                        <div class="chart-controls-wrapper" style="display: flex; align-items: center; gap: 15px;">
+                            <!-- LIST BOX CHỌN CHART -->
+                            <div class="view-selector">
+                                <i class="fa-solid fa-eye" style="color: #6b778c; margin-right: 5px;"></i>
+                                <select id="chart-view-select" class="chart-select" aria-label="Select Chart View">
+                                    <option value="all">All Charts</option>
+                                    <option value="usageCountChart">Usage Count</option>
+                                    <option value="energyChart">Total Energy</option>
+                                    <option value="usageTimeChart">Usage Frequency</option>
+                                </select>
+                            </div>
+
+                            <div class="chart-filters" style="display: flex; gap: 8px;">
+                                <button class="filter-btn active" onclick="updateCharts('1d')">1 Day</button>
+                                <button class="filter-btn" onclick="updateCharts('1w')">1 Week</button>
+                                <button class="filter-btn" onclick="updateCharts('1m')">1 Month</button>
+                                <button class="filter-btn" onclick="updateCharts('3m')">3 Months</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="charts-grid">
+                        <!-- Usage Count Chart -->
+                        <div class="chart-card" id="card-usageCountChart">
+                            <h4 class="chart-title">Usage Count per Station</h4>
+                            <div class="chart-canvas-wrapper">
+                                <canvas id="usageCountChart"></canvas>
+                            </div>
+                            <!--  tổng số session -->
+                            <div id="total-sessions-display" style="text-align: center; margin-top: 10px; font-weight: bold; color: var(--primary-color);"></div>
+                        </div>
+
+                        <!-- Total Energy Chart -->
+                        <div class="chart-card" id="card-energyChart">
+                            <h4 class="chart-title">Total Energy per Station</h4>
+                            <div class="chart-canvas-wrapper">
+                                <canvas id="energyChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Usage Frequency Over Time -->
+                        <div class="chart-card full-width" id="card-usageTimeChart">
+                            <h4 class="chart-title">Usage Frequency Over Time</h4>
+                            <div class="chart-canvas-wrapper large">
+                                <canvas id="usageTimeChart"></canvas>
+                            </div>
+                        </div>
                     </div>
                 </section>
             </div>

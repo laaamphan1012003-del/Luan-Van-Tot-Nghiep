@@ -189,6 +189,26 @@ async function getRecentTransactions() {
     }
 }
 
+async function getTransactionsByDate(startDate, endDate) {
+    if (!pool) return [];
+    try {
+        const sql = `
+            SELECT t.id, t.charge_point_id, t.id_tag, 
+                   t.start_time, t.stop_time, 
+                   t.meter_start, t.meter_stop,
+                   (t.meter_stop - t.meter_start) as total_energy
+            FROM transactions t
+            WHERE t.start_time >= ? AND t.start_time <= ?
+            ORDER BY t.start_time ASC
+        `;
+        const [rows] = await pool.execute(sql, [startDate, endDate]);
+        return rows;
+    } catch (err) {
+        console.error('[Database] Lỗi getTransactionsByDate:', err.message);
+        return [];
+    }
+}
+
 module.exports = {
     initDb,
     getAllChargePoints,
@@ -199,5 +219,6 @@ module.exports = {
     recordHeartbeat,
     startTransaction,
     stopTransaction,
-    getRecentTransactions
+    getRecentTransactions,
+    getTransactionsByDate
 };

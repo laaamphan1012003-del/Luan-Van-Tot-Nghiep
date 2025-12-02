@@ -3,10 +3,56 @@ document.addEventListener('DOMContentLoaded', () => {
     const sidebarToggleBtn = document.getElementById('sidebar-toggle');
     const sidebar = document.getElementById('admin-sidebar');
     
+    // Xử lý sự kiện toggle sidebar
     if (sidebarToggleBtn && sidebar) {
         sidebarToggleBtn.addEventListener('click', () => {
             sidebar.classList.toggle('collapsed');
         });
+    }
+
+// --- LOGIC CHART SELECTOR ---
+    const chartViewSelect = document.getElementById('chart-view-select');
+    if (chartViewSelect) {
+        chartViewSelect.addEventListener('change', (e) => {
+            const viewMode = e.target.value;
+            updateChartView(viewMode);
+        });
+    }
+
+    function updateChartView(viewMode) {
+        const grid = document.querySelector('.charts-grid');
+        const allCards = document.querySelectorAll('.chart-card');
+        
+        if (viewMode === 'all') {
+            // Show all mode
+            grid.classList.remove('single-view');
+            allCards.forEach(card => {
+                card.classList.remove('hidden', 'expanded');
+                const wrapper = card.querySelector('.chart-canvas-wrapper');
+                if(wrapper) wrapper.style.height = ''; // Reset inline style if any
+            });
+        } else {
+            // Single chart mode
+            grid.classList.add('single-view');
+            allCards.forEach(card => {
+                // Check if card matches selected view (based on ID or data-chart attribute)
+                // Here we match based on card ID which we set in HTML: card-usageCountChart, etc.
+                if (card.id === `card-${viewMode}`) {
+                    card.classList.remove('hidden');
+                    card.classList.add('expanded');
+                } else {
+                    card.classList.add('hidden');
+                    card.classList.remove('expanded');
+                }
+            });
+        }
+        
+        // Trigger resize for all charts to ensure they fit new container sizes
+        setTimeout(() => {
+            if(usageCountChart) usageCountChart.resize();
+            if(energyChart) energyChart.resize();
+            if(usageTimeChart) usageTimeChart.resize();
+        }, 300); // Small delay for transition
     }
 
     // KHAI BÁO BIẾN TOÀN CỤC & CẤU HÌNH
@@ -27,6 +73,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     let currentSqlData = [];
 
+    // Biểu đồ thống kê (Chart.js)
+    let usageCountChart = null;
+    let energyChart = null;
+    let usageTimeChart = null;
+    
     
     if (!chargersContainer) {
         console.error('Error: Element with id "chargers-container" not found!');
@@ -64,7 +115,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if(viewId === 'database-view') {
-            loadSqlData(); 
+            loadSqlData();
+            updateCharts('1w');
         }
     }
     
@@ -134,6 +186,255 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('search-tx-id').addEventListener('input', filterAndRenderSqlData);
         document.getElementById('search-cp-id').addEventListener('input', filterAndRenderSqlData);
         document.getElementById('search-date').addEventListener('change', filterAndRenderSqlData);
+    }
+
+    //--- CHART UPDATE ---
+    function toLocalIsoString(date) {
+        const pad = (num) => (num < 10 ? '0' : '') + num;
+        return date.getFullYear() +
+            '-' + pad(date.getMonth() + 1) +
+            '-' + pad(date.getDate()) +
+            'T' + pad(date.getHours()) +
+            ':' + pad(date.getMinutes()) +
+            ':' + pad(date.getSeconds());
+    }
+
+    // Cập nhật biểu đồ thống kê
+    window.updateCharts = async function(range) {
+        currentChartRange = range;
+        // Update active button state
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if(btn.getAttribute('onclick').includes(range)) btn.classList.add('active');
+        });
+
+        // Calculate date range
+        const end = new Date();
+        const start = new Date();
+        if(range === '1d') start.setDate(start.getDate() - 1);
+        if(range === '1w') start.setDate(start.getDate() - 7);
+        if(range === '1m') start.setMonth(start.getMonth() - 1);
+        if(range === '3m') start.setMonth(start.getMonth() - 3);
+
+        // Fetch data
+        try {
+            const response = await fetch(`/api/history?start=${toLocalIsoString(start)}&end=${toLocalIsoString(end)}`);
+            if (!response.ok) throw new Error("Failed to fetch chart data");
+            const data = await response.json();
+            renderCharts(data, range);
+        } catch (e) {
+            console.error("Error updating charts:", e);
+        }
+    }
+
+    const pieLabelsPlugin = {
+        id: 'pieLabels',
+        afterDatasetsDraw(chart, args, options) {
+            const { ctx } = chart;
+            chart.data.datasets.forEach((dataset, i) => {
+                const meta = chart.getDatasetMeta(i);
+                const total = dataset.data.reduce((acc, val) => acc + val, 0);
+                
+                meta.data.forEach((element, index) => {
+                    const value = dataset.data[index];
+                    if (value > 0) {
+                        const percentage = ((value / total) * 100).toFixed(1) + '%';
+                        const { x, y } = element.tooltipPosition();
+                        
+                        ctx.save();
+                        ctx.fillStyle = '#fff';
+                        ctx.font = 'bold 11px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(percentage, x, y);
+                        ctx.restore();
+                    }
+                });
+            });
+        }
+    };
+
+    const barLabelsPlugin = {
+        id: 'barLabels',
+        afterDatasetsDraw(chart, args, options) {
+            const { ctx } = chart;
+            chart.data.datasets.forEach((dataset, i) => {
+                const meta = chart.getDatasetMeta(i);
+                meta.data.forEach((element, index) => {
+                    const value = dataset.data[index];
+                    if (value > 0) {
+                        const { x, y } = element.tooltipPosition();
+                        ctx.save();
+                        ctx.fillStyle = '#172b4d';
+                        ctx.font = 'bold 11px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillText(value, x, y - 5);
+                        ctx.restore();
+                    }
+                });
+            });
+        }
+    };
+
+    function renderCharts(data, range) {
+        const ctxUsage = document.getElementById('usageCountChart').getContext('2d');
+        const ctxEnergy = document.getElementById('energyChart').getContext('2d');
+        const ctxTime = document.getElementById('usageTimeChart').getContext('2d');
+
+        // Process Data
+        const stationCounts = {};
+        const stationEnergy = {};
+        const timeLabels = [];
+        const stationTimeData = {}; 
+
+        // Aggregation logic
+        data.forEach(tx => {
+            const cp = tx.charge_point_id;
+            const energy = tx.total_energy || (tx.meter_stop - tx.meter_start) || 0;
+            
+            // Pie and Bar data
+            stationCounts[cp] = (stationCounts[cp] || 0) + 1;
+            stationEnergy[cp] = (stationEnergy[cp] || 0) + energy;
+
+            // Line chart data grouping
+            const date = new Date(tx.start_time);
+            let timeKey;
+            if (range === '1d') {
+                timeKey = date.getHours() + ":00"; // Group by hour
+            } else {
+                timeKey = date.toISOString().split('T')[0]; // Group by day
+            }
+
+            if (!stationTimeData[cp]) stationTimeData[cp] = {};
+            stationTimeData[cp][timeKey] = (stationTimeData[cp][timeKey] || 0) + 1;
+            
+            if (!timeLabels.includes(timeKey)) timeLabels.push(timeKey);
+        });
+
+        // Sort time labels
+        if (range === '1d') {
+             timeLabels.sort((a, b) => parseInt(a) - parseInt(b));
+        } else {
+             timeLabels.sort();
+        }
+
+        const bgColors = [
+            '#0052cc', '#00875a', '#de350b', '#ff991f', '#5243aa', '#00b8d9', '#36b37e'
+        ];
+
+        // --- 1. Usage Count Pie Chart ---
+       const totalSessions = Object.values(stationCounts).reduce((acc, val) => acc + val, 0);
+        const totalSessionsDisplay = document.getElementById('total-sessions-display');
+        if(totalSessionsDisplay) totalSessionsDisplay.innerHTML = `Total Sessions: ${totalSessions}`;
+
+        if (usageCountChart) usageCountChart.destroy();
+        usageCountChart = new Chart(ctxUsage, {
+            type: 'pie',
+            data: {
+                labels: Object.keys(stationCounts),
+                datasets: [{
+                    data: Object.values(stationCounts),
+                    backgroundColor: bgColors,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { boxWidth: 12 } },
+                    datalabels: {
+                        formatter: (value, ctx) => {
+                            // Chỉ hiện nếu > 5% để tránh lấn nhau
+                            let sum = 0;
+                            let dataArr = ctx.chart.data.datasets[0].data;
+                            dataArr.map(data => { sum += data; });
+                            let percentage = (value*100 / sum).toFixed(1);
+                            if (percentage < 5) return ""; 
+                            // Hiển thị: Số lượng (Phần trăm)
+                            return `${value} (${percentage}%)`;
+                        },
+                        color: '#fff',
+                        font: { weight: 'bold', size: 11 },
+                        anchor: 'center',
+                        align: 'center',
+                        offset: 0,
+                        textShadowColor: '#000',
+                        textShadowBlur: 2
+                    }
+                }
+            }
+        });
+
+
+        // --- 2. Energy Bar Chart ---
+        if (energyChart) energyChart.destroy();
+        energyChart = new Chart(ctxEnergy, {
+            type: 'bar', // Column Chart
+            data: {
+                labels: Object.keys(stationEnergy),
+                datasets: [{
+                    label: 'Energy Consumed (kWh)',
+                    data: Object.values(stationEnergy).map(e => (e/1000).toFixed(2)),
+                    backgroundColor: bgColors,
+                    borderWidth: 1,
+                    borderRadius: 4
+                }]
+            },
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        title: { display: true, text: 'Energy (kWh)' },
+                        grid: { color: '#f0f0f0' }
+                    },
+                    x: { grid: { display: false } }
+                },
+                plugins: { 
+                    legend: { display: false }, 
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'top',
+                        color: '#172b4d',
+                        font: { weight: 'bold' },
+                        formatter: (value) => value // Hiển thị số kWh trên đầu cột
+                    }
+                }
+            }
+        });
+
+        // --- 3. Usage Frequency Over Time (Line Chart) ---
+        // Prepare datasets for line chart
+        const lineDatasets = Object.keys(stationTimeData).map((cp, index) => {
+            return {
+                label: cp,
+                data: timeLabels.map(t => stationTimeData[cp][t] || 0),
+                borderColor: bgColors[index % bgColors.length],
+                backgroundColor: bgColors[index % bgColors.length],
+                tension: 0.1,
+                fill: false
+            };
+        });
+
+        if (usageTimeChart) usageTimeChart.destroy();
+        usageTimeChart = new Chart(ctxTime, {
+            type: 'line',
+            data: {
+                labels: timeLabels,
+                datasets: lineDatasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Sessions' } },
+                    x: { title: { display: true, text: range === '1d' ? 'Hour' : 'Date' } }
+                }
+            }
+        });
     }
 
     // =========================================================================
