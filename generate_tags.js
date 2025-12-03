@@ -13,6 +13,7 @@ const DB_CONFIG = {
 // Cấu hình WinCC
 const WINCC_CONNECTION_NAME = "Connection_1";
 const NAMESPACE_INDEX = 1;
+const OPC_UA_SERVER_STRING = "opc.tcp://192.168.1.8:4840/UA/OcppCsmsServer"
 
 // 2. DANH SÁCH BIẾN (Giữ nguyên như cũ)
 const variableDefs = [
@@ -76,7 +77,7 @@ async function main() {
         STATION_LIST.forEach(stationId => {
             variableDefs.forEach(def => {
                 const tagName = `${stationId}_${def.name}`;
-                const address = `ns=${NAMESPACE_INDEX};s=${stationId}_${def.name}`;
+                const address = `ns=${OPC_UA_SERVER_STRING};s=${stationId}_${def.name}`;
                 const winccType = mapDataType(def.type);
 
                 dataRows.push([

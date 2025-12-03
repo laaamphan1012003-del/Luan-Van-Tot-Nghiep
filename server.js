@@ -901,8 +901,24 @@ setInterval(() => {
             electricalParams: electricalParams // <--- Thêm vào gói tin
         });
         
-        opcUpdateData.SoC = parseFloat(state.soc);
-        opcUpdateData.Energy_kWh = parseFloat((state.energy / 1000).toFixed(3));
+        const opcUpdateData = {
+            SoC: parseFloat(state.soc),
+            Energy_kWh: parseFloat((state.energy / 1000).toFixed(3)),
+
+            // 2. Dữ liệu điện năng (Lấy từ calculateServerElectricalParams)
+            Power_Total: electricalParams.p_total,
+            ReActivePower_Total: electricalParams.q_total,
+            PF: electricalParams.pf,
+            Current_Total: electricalParams.i_sum,
+            Current_a: electricalParams.ia,
+            Current_b: electricalParams.ib,
+            Current_c: electricalParams.ic,
+            Voltage_Average: electricalParams.v_avg,
+            Voltage_ab: electricalParams.vab,
+            Voltage_bc: electricalParams.vbc,
+            Voltage_ac: electricalParams.vca
+        };
+
         updateOpcuaVariables(state.id, opcUpdateData);
 
         if (cp.ws && cp.ws.readyState === WebSocket.OPEN) {
