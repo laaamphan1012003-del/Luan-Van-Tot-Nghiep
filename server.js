@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const db = require('./database.js');
 const os = require('os');
 const {
@@ -127,153 +127,151 @@ function calculateServerElectricalParams(state) {
     const I_sum = Ia + Ib + Ic;
 
     return {
-        v_avg: V_avg.toFixed(1),
-        vab: Vab.toFixed(1),
-        vbc: Vbc.toFixed(1),
-        vca: Vca.toFixed(1),
-        i_sum: I_sum.toFixed(1),
-        ia: Ia.toFixed(1),
-        ib: Ib.toFixed(1),
-        ic: Ic.toFixed(1),
-        p_total: P_total.toFixed(2),
-        q_total: Q_total.toFixed(2),
-        pf: PF.toFixed(2)
+        v_avg: parseFloat(V_avg.toFixed(1)),
+        vab: parseFloat(Vab.toFixed(1)),
+        vbc: parseFloat(Vbc.toFixed(1)),
+        vca: parseFloat(Vca.toFixed(1)),
+        i_sum: parseFloat(I_sum.toFixed(1)),
+        ia: parseFloat(Ia.toFixed(1)),
+        ib: parseFloat(Ib.toFixed(1)),
+        ic: parseFloat(Ic.toFixed(1)),
+        p_total: parseFloat(P_total.toFixed(2)),
+        q_total: parseFloat(Q_total.toFixed(2)),
+        pf: parseFloat(PF.toFixed(2))
     };
 }
 
 // Hàm helper để cập nhật giá trị 1 tag OPC UA
-function updateOpcuaTag(chargePointId, tagName, value) {
+function updateOpcuaVariables(chargePointId, dataToUpdate) {
     const cp = clients.chargePoints.get(chargePointId);
-    if (cp && cp.opcuaNodes && cp.opcuaNodes[tagName]) {
+    if (cp && cp.opcuaNodes) {
         try {
-            const node = cp.opcuaNodes[tagName];
-            node.setValueFromSource(new Variant({ dataType: node.dataTypeObj.dataType, value: value }));
+            for (const [key, value] of Object.entries(dataToUpdate)) {
+                if (cp.opcuaNodes[key]) {
+                    let type = DataType.Double;
+                    if (typeof value === 'string') type = DataType.String;
+                    if (typeof value === 'boolean') type = DataType.Boolean;
+                    if (key === 'TransactionID') type = DataType.Int32;
+
+                    cp.opcuaNodes[key].setValueFromSource(new Variant({ dataType: type, value: value }));
+                }
+            }
         } catch (err) {
-            console.error(`[OPC UA] Lỗi khi cập nhật tag ${tagName} cho ${chargePointId}:`, err);
+            console.error(`[OPC UA] Lỗi update tag ${key} cho ${chargePointId}:`, err);
         }
     }
 }
 
 function createOpcUaNodesForChargePoint(chargePointId) {
     if (!opcUaAddressSpace) return null; 
-
     const namespace = opcUaAddressSpace.getOwnNamespace();
-    const nsIndex = namespace.index;
-    const chargePointsFolder = opcUaAddressSpace.findNode(`ns=${nsIndex};s=ChargePointsFolder`);
+    const chargePointsFolder = opcUaAddressSpace.findNode(`ns=${namespace.index};s=ChargePointsFolder`);
 
-    if (!chargePointsFolder) {
-        console.error("[OPC UA] Lỗi nghiêm trọng: Không tìm thấy 'ChargePointsFolder'.");
-        return;
-    }
+    if (!chargePointsFolder) return;
 
-    const folderNodeId = `ns=${nsIndex};s=${chargePointId}`;
-    let chargePointFolder = opcUaAddressSpace.findNode(folderNodeId);
-
-    const nodes = {};
-    const variableNodeId = (name) => `ns=${nsIndex};s=${chargePointId}.${name}`;
-
-    if (!chargePointFolder) {
-        console.log(`[OPC UA] Đang tạo thư mục mới cho ${chargePointId}`);
-        try {
-            chargePointFolder = namespace.addFolder(chargePointsFolder, {
-                browseName: chargePointId,
-                nodeId: folderNodeId
-            });
-
-            nodes.Status = namespace.addVariable({ componentOf: chargePointFolder, browseName: "Status", dataType: DataType.String, value: { dataType: DataType.String, value: "Connecting" }, nodeId: variableNodeId("Status") });
-            nodes.Energy_Wh = namespace.addVariable({ componentOf: chargePointFolder, browseName: "Energy_Wh", dataType: DataType.Double, value: { dataType: DataType.Double, value: 0 }, nodeId: variableNodeId("Energy_Wh") });
-            nodes.TransactionID = namespace.addVariable({ componentOf: chargePointFolder, browseName: "TransactionID", dataType: DataType.Int32, value: { dataType: DataType.Int32, value: 0 }, nodeId: variableNodeId("TransactionID") });
-            nodes.Vendor = namespace.addVariable({ componentOf: chargePointFolder, browseName: "Vendor", dataType: DataType.String, value: { dataType: DataType.String, value: "" }, nodeId: variableNodeId("Vendor") });
-            nodes.Model = namespace.addVariable({ componentOf: chargePointFolder, browseName: "Model", dataType: DataType.String, value: { dataType: DataType.String, value: "" }, nodeId: variableNodeId("Model") });
-            nodes.RemoteStartTrigger = namespace.addVariable({ componentOf: chargePointFolder, browseName: "RemoteStart_Trigger", dataType: DataType.Boolean, value: { dataType: DataType.Boolean, value: false }, accessLevel: "CurrentRead | CurrentWrite", userAccessLevel: "CurrentRead | CurrentWrite", nodeId: variableNodeId("RemoteStart_Trigger") });
-            nodes.RemoteStart_IdTag = namespace.addVariable({ componentOf: chargePointFolder, browseName: "RemoteStart_IdTag", dataType: DataType.String, value: { dataType: DataType.String, value: "0000" }, accessLevel: "CurrentRead | CurrentWrite", userAccessLevel: "CurrentRead | CurrentWrite", nodeId: variableNodeId("RemoteStart_IdTag") });
-            nodes.RemoteStopTrigger = namespace.addVariable({ componentOf: chargePointFolder, browseName: "RemoteStop_Trigger", dataType: DataType.Boolean, value: { dataType: DataType.Boolean, value: false }, accessLevel: "CurrentRead | CurrentWrite", userAccessLevel: "CurrentRead | CurrentWrite", nodeId: variableNodeId("RemoteStop_Trigger") });
-        
-        } catch (err) {
-            console.error(`[OPC UA] Lỗi khi tạo node cho ${chargePointId}:`, err.message);
-            chargePointFolder = opcUaAddressSpace.findNode(folderNodeId);
-        }
-    }
-
-    if (chargePointFolder) {
-        console.log(`[OPC UA] Sử dụng node folder đã tồn tại cho ${chargePointId}.`);
-        if (!nodes.Status) nodes.Status = namespace.findNode(variableNodeId("Status"));
-        if (!nodes.Energy_Wh) nodes.Energy_Wh = namespace.findNode(variableNodeId("Energy_Wh"));
-        if (!nodes.TransactionID) nodes.TransactionID = namespace.findNode(variableNodeId("TransactionID"));
-        if (!nodes.Vendor) nodes.Vendor = namespace.findNode(variableNodeId("Vendor"));
-        if (!nodes.Model) nodes.Model = namespace.findNode(variableNodeId("Model"));
-        if (!nodes.RemoteStartTrigger) nodes.RemoteStartTrigger = namespace.findNode(variableNodeId("RemoteStart_Trigger"));
-        if (!nodes.RemoteStart_IdTag) nodes.RemoteStart_IdTag = namespace.findNode(variableNodeId("RemoteStart_IdTag"));
-        if (!nodes.RemoteStopTrigger) nodes.RemoteStopTrigger = namespace.findNode(variableNodeId("RemoteStop_Trigger"));
-    }
-
-    if (!nodes.RemoteStartTrigger || !nodes.RemoteStopTrigger || !nodes.RemoteStart_IdTag) {
-        console.error(`[OPC UA] Lỗi: Không thể tìm thấy các node trigger cho ${chargePointId}. Hủy bỏ binding.`);
-        return nodes; 
-    }
-
-    try {
-        // --- 1. START TRIGGER ---
-        nodes.RemoteStartTrigger.bindVariable({     
-            get: function() {
-                return new Variant({ dataType: DataType.Boolean, value: false });
-            },
-            set: (variant, callback) => {
-                const value = variant.value;
-                if (value == true) { 
-                    console.log(`[OPC UA] Nhận lệnh RemoteStart cho ${chargePointId}`);
-                    try {
-                        const dataValue = nodes.RemoteStart_IdTag.readValue();
-                        const idTag = (dataValue.value && dataValue.value.value) ? dataValue.value.value : "0000";
-                        
-                        const targetCP = clients.chargePoints.get(chargePointId);
-                        if (targetCP && targetCP.ws && targetCP.ws.readyState === WebSocket.OPEN) {
-                            const uniqueId = uuidv4();
-                            const ocppMessage = [2, uniqueId, "RemoteStartTransaction", { idTag: idTag, connectorId: 1 }];
-                            targetCP.ws.send(JSON.stringify(ocppMessage));
-                        }
-                    } catch (err) {
-                        console.error("[OPC UA] Lỗi khi đọc IdTag hoặc gửi lệnh Start:", err.message);
-                    }
-                    nodes.RemoteStartTrigger.setValueFromSource(new Variant({ dataType: DataType.Boolean, value: false }));
-                }
-                callback(null, StatusCodes.Good);
-            }
-        }, true); 
-
-        // --- 2. STOP TRIGGER ---
-        nodes.RemoteStopTrigger.bindVariable({    
-            get: function() {
-                return new Variant({ dataType: DataType.Boolean, value: false });
-            },
-            set: (variant, callback) => {
-                const value = variant.value;
-                if (value == true) { 
-                    console.log(`[OPC UA] Nhận lệnh RemoteStop cho ${chargePointId}`);
-                    try {
-                        const targetCP = clients.chargePoints.get(chargePointId);
-                        const state = targetCP ? targetCP.state : null;
-                        if (state && state.transactionId && targetCP && targetCP.ws && targetCP.ws.readyState === WebSocket.OPEN) {
-                            const uniqueId = uuidv4();
-                            const ocppMessage = [2, uniqueId, "RemoteStopTransaction", { transactionId: state.transactionId }];
-                            targetCP.ws.send(JSON.stringify(ocppMessage));
-                        }
-                    } catch (err) {
-                        console.error("[OPC UA] Lỗi khi gửi lệnh Stop:", err.message);
-                    }
-                    nodes.RemoteStopTrigger.setValueFromSource(new Variant({ dataType: DataType.Boolean, value: false }));
-                }
-                callback(null, StatusCodes.Good);
-            }
-        }, true); 
-
-        console.log(`[OPC UA] Binding cho ${chargePointId} thành công.`);
-
-    } catch (err) {
-        console.error(`[OPC UA] Lỗi không mong muốn khi binding ${chargePointId}: ${err.message}`);
-    }
+    const cpNodeId = `ns=${namespace.index};s=${chargePointId}`;
+    let cpFolder = opcUaAddressSpace.findNode(cpNodeId);
     
+    // Object lưu trữ các node con để truy cập nhanh
+    const nodes = {};
+
+    // Định nghĩa danh sách biến chuẩn
+    const variableDefs = [
+        { name: "Status", type: DataType.String, init: "Offline" }, // Mặc định là Offline khi load từ DB
+        { name: "ChargeSpeed", type: DataType.String, init: "" },
+        { name: "Vendor", type: DataType.String, init: "" },
+        { name: "Model", type: DataType.String, init: "" },
+        { name: "TransactionID", type: DataType.Int32, init: 0 },
+        { name: "SoC", type: DataType.Double, init: 0.0 },
+        { name: "Energy_kWh", type: DataType.Double, init: 0.0 },
+        { name: "Power_Total", type: DataType.Double, init: 0.0 },
+        { name: "ReActivePower_Total", type: DataType.Double, init: 0.0 },
+        { name: "PF", type: DataType.Double, init: 0.0 },
+        { name: "Current_Total", type: DataType.Double, init: 0.0 },
+        { name: "Current_a", type: DataType.Double, init: 0.0 },
+        { name: "Current_b", type: DataType.Double, init: 0.0 },
+        { name: "Current_c", type: DataType.Double, init: 0.0 },
+        { name: "Voltage_Average", type: DataType.Double, init: 0.0 },
+        { name: "Voltage_ab", type: DataType.Double, init: 0.0 },
+        { name: "Voltage_bc", type: DataType.Double, init: 0.0 },
+        { name: "Voltage_ac", type: DataType.Double, init: 0.0 },
+        { name: "RemoteStart_Trigger", type: DataType.Boolean, init: false },
+        { name: "RemoteStop_Trigger", type: DataType.Boolean, init: false },
+        { name: "RemoteStart_IdTag", type: DataType.String, init: "0000" }
+    ];
+
+    if (!cpFolder) {
+        console.log(`[OPC UA] Tạo Folder mới cho ${chargePointId}`);
+        cpFolder = namespace.addFolder(chargePointsFolder, {
+            browseName: chargePointId,
+            nodeId: cpNodeId
+        });
+
+        // Tạo mới từng biến
+        variableDefs.forEach(def => {
+            const node = namespace.addVariable({
+                componentOf: cpFolder,
+                browseName: def.name,
+                nodeId: `ns=${namespace.index};s=${chargePointId}_${def.name}`,
+                dataType: def.type,
+                value: { dataType: def.type, value: def.init },
+                accessLevel: "CurrentRead | CurrentWrite",
+                userAccessLevel: "CurrentRead | CurrentWrite"
+            });
+            nodes[def.name] = node;
+            attachTriggerLogic(chargePointId, def.name, node, nodes);
+        });
+    } else {
+        // --- LOGIC MỚI: TÌM LẠI NODE CŨ ĐÃ TẠO TỪ DB ---
+        console.log(`[OPC UA] Folder ${chargePointId} đã có sẵn. Đang liên kết lại...`);
+        variableDefs.forEach(def => {
+            const nodeId = `ns=${namespace.index};s=${chargePointId}_${def.name}`;
+            const existingNode = opcUaAddressSpace.findNode(nodeId);
+            if (existingNode) {
+                nodes[def.name] = existingNode;
+                // Gán lại logic trigger vì khi tạo ở initialize có thể chưa có clients.chargePoints map
+                existingNode.removeAllListeners("value_changed"); // Xóa listener cũ (nếu có) để tránh double
+                attachTriggerLogic(chargePointId, def.name, existingNode, nodes);
+            }
+        });
+    }
+
     return nodes;
+}
+
+function attachTriggerLogic(chargePointId, varName, node, allNodes) {
+    if (varName === "RemoteStart_Trigger") {
+        node.on("value_changed", (dataValue) => {
+            if (dataValue.value.value === true) {
+                console.log(`[OPC UA] TRIGGER: Remote Start ${chargePointId}`);
+                const idTagNode = allNodes["RemoteStart_IdTag"];
+                const idTag = idTagNode ? idTagNode.readValue().value.value : "0000";
+                
+                const targetCP = clients.chargePoints.get(chargePointId);
+                if (targetCP && targetCP.ws && targetCP.ws.readyState === WebSocket.OPEN) {
+                    const msg = [2, uuidv4(), "RemoteStartTransaction", { idTag: idTag, connectorId: 1 }];
+                    targetCP.ws.send(JSON.stringify(msg));
+                } else {
+                    console.log(`[OPC UA] Không thể Start: Trạm ${chargePointId} chưa kết nối WebSocket.`);
+                }
+                setTimeout(() => node.setValueFromSource(new Variant({dataType: DataType.Boolean, value: false})), 500);
+            }
+        });
+    }
+
+    if (varName === "RemoteStop_Trigger") {
+        node.on("value_changed", (dataValue) => {
+            if (dataValue.value.value === true) {
+                console.log(`[OPC UA] TRIGGER: Remote Stop ${chargePointId}`);
+                const targetCP = clients.chargePoints.get(chargePointId);
+                if (targetCP && targetCP.state && targetCP.state.transactionId) {
+                    const msg = [2, uuidv4(), "RemoteStopTransaction", { transactionId: targetCP.state.transactionId }];
+                    targetCP.ws.send(JSON.stringify(msg));
+                }
+                setTimeout(() => node.setValueFromSource(new Variant({dataType: DataType.Boolean, value: false})), 500);
+            }
+        });
+    }
 }
 
 // Hàm khởi tạo và cấu hình OPC UA Server
@@ -331,17 +329,32 @@ async function initializeOpcUaServer() {
 
     // Lấy đối tượng addressSpace để thêm các biến
     opcUaAddressSpace = opcUaServer.engine.addressSpace;
-    const objectsFolder = opcUaAddressSpace.findNode("i=85");
     // Tạo một thư mục gốc cho các trạm sạc
     const namespace = opcUaAddressSpace.getOwnNamespace();
     const nsIndex = namespace.index;
-    
+    const objectsFolder = opcUaAddressSpace.findNode("i=85");
+
     namespace.addFolder(objectsFolder, {
         browseName: "ChargePoints",
-        nodeId: `ns=${nsIndex};s=ChargePointsFolder`
+        nodeId: `ns=${namespace.index};s=ChargePointsFolder`
     });
 
-    console.log("[OPC UA] Server đã được khởi tạo và sẵn sàng.");
+    // --- TỰ ĐỘNG LOAD TRẠM TỪ DATABASE ---
+    try {
+        console.log("[OPC UA] Đang đồng bộ danh sách trạm từ Database...");
+        const dbStations = await db.getAllChargePoints();
+        if (dbStations && dbStations.length > 0) {
+            dbStations.forEach(station => {
+                // Tạo sẵn node cho trạm, kể cả khi chưa online
+                createOpcUaNodesForChargePoint(station.id);
+                // Cập nhật trạng thái ban đầu là Status của DB (thường là Unavailable/Offline)
+                // Lưu ý: createOpcUaNodesForChargePoint trả về nodes, nhưng ta chưa cần dùng ngay
+            });
+            console.log(`[OPC UA] Đã tạo sẵn ${dbStations.length} trạm sạc trên OPC UA.`);
+        }
+    } catch (e) {
+        console.error("[OPC UA] Lỗi khi load trạm từ DB:", e);
+    }
 
     // Bắt đầu server
     await opcUaServer.start();
@@ -419,12 +432,27 @@ const server = http.createServer(async (req, res) => {
                     if (!id) throw new Error("Missing ID");
                     
                     await db.createChargePoint(id, location);
+                    createOpcUaNodesForChargePoint(id);
                     
                     // Báo cho các dashboard biết có trạm mới
                     broadcastToDashboards({ 
                         type: 'connect', 
                         id: id, 
                         state: { id, location, status: 'Unavailable', vendor: 'N/A', model: 'N/A' } 
+                    });
+
+                    // TỰ ĐỘNG CẬP NHẬT EXCEL
+                    console.log("[System] Đang tự động cập nhật file Excel tag...");
+                    exec('node generate_tags.js', (error, stdout, stderr) => {
+                        if (error) {
+                            console.error(`[Auto-Excel] Lỗi: ${error.message}`);
+                            return;
+                        }
+                        if (stderr) {
+                            console.error(`[Auto-Excel] Stderr: ${stderr}`);
+                            return;
+                        }
+                        console.log(`[Auto-Excel] Thành công: ${stdout.trim()}`);
                     });
 
                     res.writeHead(201, { 'Content-Type': 'application/json' });
@@ -662,9 +690,11 @@ wss.on('connection', async (ws, req) => {
                     db.updateChargePoint(chargePointId, chargePointState.vendor, chargePointState.model);
                     
                     broadcastToDashboards({ type: 'boot', id: chargePointId, state: chargePointState });
-                    updateOpcuaTag(chargePointId, "Vendor", chargePointState.vendor);
-                    updateOpcuaTag(chargePointId, "Model", chargePointState.model);
-                    updateOpcuaTag(chargePointId, "Status", chargePointState.status);
+                    updateOpcuaVariables(chargePointId, {
+                        Vendor: chargePointState.vendor,
+                        Model: chargePointState.model,
+                        Status: chargePointState.status
+                    });
 
                     // *** GỬI LỆNH PHỤC HỒI ***
                     if (isReconnection && chargePointState.transactionId) {
@@ -695,7 +725,7 @@ wss.on('connection', async (ws, req) => {
                     } else {
                         chargePointState.status = payload.status;
                         broadcastToDashboards({ type: 'status', id: chargePointId, status: chargePointState.status });
-                        updateOpcuaTag(chargePointId, "Status", chargePointState.status);
+                        updateOpcuaVariables(chargePointId, { Status: chargePointState.status });
                     }
                 } 
                 else if (action === 'StopTransaction') {
@@ -715,8 +745,10 @@ wss.on('connection', async (ws, req) => {
                     broadcastToDashboards({ type: 'transactionStop', id: chargePointId, transactionId: null });
                     broadcastToDashboards({ type: 'meterValue', id: chargePointId, value: 0, soc: DEFAULT_START_SOC, timeRemaining: '--:--:--' });
                     broadcastToDashboards({ type: 'speedUpdate', id: chargePointId, speed: null });
-                    updateOpcuaTag(chargePointId, "TransactionID", 0);
-                    updateOpcuaTag(chargePointId, "Energy_Wh", 0);
+                    updateOpcuaVariables(chargePointId, { 
+                        TransactionID: 0, 
+                        Energy_kWh: 0 
+                    });
                 }
                 else if (action === 'MeterValues') {
                     // ...existing code...
@@ -726,6 +758,7 @@ wss.on('connection', async (ws, req) => {
                     console.log(`[Master] Nhận tốc độ sạc từ ${chargePointId}: ${speed}`);
                     chargePointState.chargeSpeed = speed;
                     broadcastToDashboards({ type: 'speedUpdate', id: chargePointId, speed: speed });
+                    updateOpcuaVariables(chargePointId, { ChargeSpeed: payload.data });
                 }
 
                 broadcastToDashboards({ type: 'log', direction: 'request', chargePointId, message: parsedMessage });
@@ -768,8 +801,10 @@ wss.on('connection', async (ws, req) => {
                                  
                                  db.startTransaction(chargePointId, payload.transactionId, "UNKNOWN_TAG", 0);
                                  broadcastToDashboards({ type: 'transactionStart', id: chargePointId, transactionId: chargePointState.transactionId });
-                                 updateOpcuaTag(chargePointId, "TransactionID", payload.transactionId);
-                                 updateOpcuaTag(chargePointId, "Energy_Wh", 0);
+                                 updateOpcuaVariables(chargePointId, {
+                                    TransactionID: payload.transactionId,
+                                    Energy_kWh: 0
+                                 });
                             }
                         }
                     } catch (e) {
@@ -812,6 +847,7 @@ wss.on('connection', async (ws, req) => {
                     clients.chargePoints.delete(chargePointId);
                     db.updateChargePointStatus(chargePointId, 'Unavailable');
                     broadcastToDashboards({ type: 'disconnect', id: chargePointId });
+                    updateOpcuaVariables(chargePointId, { Status: "Offline" });
                 }
             }
         });
@@ -865,7 +901,9 @@ setInterval(() => {
             electricalParams: electricalParams // <--- Thêm vào gói tin
         });
         
-        updateOpcuaTag(state.id, "Energy_Wh", state.energy);
+        opcUpdateData.SoC = parseFloat(state.soc);
+        opcUpdateData.Energy_kWh = parseFloat((state.energy / 1000).toFixed(3));
+        updateOpcuaVariables(state.id, opcUpdateData);
 
         if (cp.ws && cp.ws.readyState === WebSocket.OPEN) {
             const syncMsg = [2, uuidv4(), "DataTransfer", {
@@ -893,59 +931,6 @@ setInterval(() => {
         }
     });
 }, 5000);
-
-function monitorOpcUaWrites(chargePointId, opcuaNodes) {
-    
-    // Theo dõi lệnh START
-    opcuaNodes.RemoteStartTrigger.bindVariable({
-        set: (variant, callback) => {
-            const value = variant.value;
-            if (value === true) {
-                console.log(`[OPC UA] Nhận lệnh RemoteStart cho ${chargePointId}`);
-                
-                // Đọc IdTag mà WinCC đã nhập
-                const idTag = opcuaNodes.RemoteStart_IdTag.readValue().value.value || "0000";
-
-                // Tái sử dụng logic gửi lệnh từ dashboard
-                const targetCP = clients.chargePoints.get(chargePointId);
-                if (targetCP && targetCP.ws.readyState === WebSocket.OPEN) {
-                    const uniqueId = uuidv4();
-                    const ocppMessage = [2, uniqueId, "RemoteStartTransaction", { idTag: idTag, connectorId: 1 }];
-                    targetCP.ws.send(JSON.stringify(ocppMessage));
-                    console.log(`[Master] Đã gửi lệnh RemoteStartTransaction tới ${chargePointId} (từ OPC UA)`);
-                }
-
-                // Tự động reset trigger về false
-                opcuaNodes.RemoteStartTrigger.setValueFromSource(new Variant({ dataType: DataType.Boolean, value: false }));
-            }
-            callback(null, StatusCodes.Good);
-        }
-    });
-
-    // 2. Theo dõi lệnh STOP
-    opcuaNodes.RemoteStopTrigger.bindVariable({
-        set: (variant, callback) => {
-            const value = variant.value;
-            if (value === true) {
-                console.log(`[OPC UA] Nhận lệnh RemoteStop cho ${chargePointId}`);
-                
-                const targetCP = clients.chargePoints.get(chargePointId);
-                const state = targetCP ? targetCP.state : null;
-
-                if (state && state.transactionId && targetCP.ws.readyState === WebSocket.OPEN) {
-                    const uniqueId = uuidv4();
-                    const ocppMessage = [2, uniqueId, "RemoteStopTransaction", { transactionId: state.transactionId }];
-                    targetCP.ws.send(JSON.stringify(ocppMessage));
-                    console.log(`[Master] Đã gửi lệnh RemoteStopTransaction tới ${chargePointId} (từ OPC UA)`);
-                }
-                
-                // Tự động reset trigger về false
-                opcuaNodes.RemoteStopTrigger.setValueFromSource(new Variant({ dataType: DataType.Boolean, value: false }));
-            }
-            callback(null, StatusCodes.Good);
-        }
-    });
-}
 
 // --- XỬ LÝ GRACEFUL SHUTDOWN ---
 // Giúp giải phóng PORT và kill các tiến trình con khi server tắt
@@ -994,6 +979,21 @@ async function startServer() {
         await initializeOpcUaServer();
         const PORT = process.env.PORT || 9000;
         
+        exec('node generate_tags.js', (error, stdout, stderr) => {
+            if (error) {
+                // Lỗi nghiêm trọng 
+                console.error(`[Auto-Excel] LỖI KHỞI ĐỘNG: ${error.message}`);
+            }
+            if (stderr) {
+                // Lỗi nhỏ 
+                console.error(`[Auto-Excel] Stderr: ${stderr}`);
+            }
+            if (stdout) {
+                // Thông báo thành công từ generate_tags.js
+                console.log(`[Auto-Excel] Khởi động thành công: ${stdout.trim()}`);
+            }
+        });
+
         // Xử lý lỗi port conflict
         server.on('error', (e) => {
             if (e.code === 'EADDRINUSE') {
