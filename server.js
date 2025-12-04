@@ -571,7 +571,8 @@ wss.on('connection', async (ws, req) => {
                     const { command, chargePointId, params } = data;
                     const targetCP = clients.chargePoints.get(chargePointId);
 
-                    if (targetCP && targetCP.ws.readyState === WebSocket.OPEN) {
+                    if (targetCP && targetCP.ws && targetCP.ws.readyState === WebSocket.OPEN) {
+                        // 1. Trường hợp App đang ONLINE -> Gửi lệnh bình thường
                         const uniqueId = uuidv4();
                         const ocppMessage = [2, uniqueId, command, params || {}];
                         targetCP.ws.send(JSON.stringify(ocppMessage));
@@ -585,7 +586,62 @@ wss.on('connection', async (ws, req) => {
                         });
 
                     } else {
-                        console.error(`[Master] Lỗi: Không tìm thấy hoặc không thể kết nối tới trạm ${chargePointId}`);
+                        // 2. Trường hợp App OFFLINE (Socket đã đóng hoặc null)
+                        // Server tự xử lý "Force Stop" để cập nhật trạng thái
+                        if (command === 'RemoteStopTransaction') {
+                            console.warn(`[Master] Trạm ${chargePointId} Offline. Thực hiện FORCE STOP trên Server.`);
+                            
+                            // Lấy thông tin session cũ nếu còn lưu trong bộ nhớ
+                            let txId = params.transactionId;
+                            if (!txId && targetCP && targetCP.state) {
+                                txId = targetCP.state.transactionId;
+                            }
+
+                            // Tính toán giá trị năng lượng cuối cùng
+                            let finalEnergy = 0;
+                            if (targetCP && targetCP.state && targetCP.state.energy) {
+                                finalEnergy = targetCP.state.energy;
+                            }
+
+                            // Cập nhật Database với giá trị thực
+                            if (txId) {
+                                db.stopTransaction(txId, finalEnergy); 
+                            }
+
+                            // Cập nhật trạng thái Server (nếu còn object trong map)
+                            if (targetCP && targetCP.state) {
+                                targetCP.state.transactionId = null;
+                                targetCP.state.initialSoc = DEFAULT_START_SOC;
+                                targetCP.state.soc = DEFAULT_START_SOC;
+                                targetCP.state.timeRemaining = '--:--:--';
+                                targetCP.state.chargeSpeed = null;
+                                targetCP.state.status = 'Available'; // Reset về Available
+                                targetCP.ws = null; // Đảm bảo socket null
+                            }
+
+                            // Cập nhật DB trạng thái trạm
+                            db.updateChargePointStatus(chargePointId, 'Available');
+
+                            // Đồng bộ Dashboard ngay lập tức
+                            broadcastToDashboards({ type: 'transactionStop', id: chargePointId, transactionId: null });
+                            broadcastToDashboards({ type: 'status', id: chargePointId, status: 'Available' });
+                            broadcastToDashboards({ type: 'meterValue', id: chargePointId, value: finalEnergy, soc: DEFAULT_START_SOC, timeRemaining: '--:--:--' });
+                            broadcastToDashboards({ type: 'speedUpdate', id: chargePointId, speed: null });
+                            
+                            // Đồng bộ OPC UA
+                            updateOpcuaVariables(chargePointId, { 
+                                TransactionID: 0, 
+                                Energy_kWh: 0,
+                                Status: "Available"
+                            });
+
+                            if (targetCP && targetCP.state) {
+                                targetCP.state.energy = 0;
+                            }
+
+                        } else {
+                            console.error(`[Master] Lỗi: Không tìm thấy hoặc không thể kết nối tới trạm ${chargePointId} để gửi lệnh ${command}`);
+                        }
                     }
                 }
             } catch (e) {
@@ -610,7 +666,6 @@ wss.on('connection', async (ws, req) => {
         let isReconnection = false;
         
         // Kiểm tra xem có session nào đang chạy không
-        // Sửa: Thêm 'Preparing' vào danh sách active statuses
         const activeStatuses = ['Preparing', 'Charging', 'Finishing', 'SuspendedEV', 'SuspendedEVSE'];
         
         if (existingCp && existingCp.state && activeStatuses.includes(existingCp.state.status)) {
@@ -739,7 +794,7 @@ wss.on('connection', async (ws, req) => {
 
                     chargePointState.transactionId = null;
                     chargePointState.energy = 0;
-                    chargePointState.soc = DEFAULT_START_SOC;
+                    chargePointState.initialSoc = DEFAULT_START_SOC;
                     chargePointState.timeRemaining = '--:--:--';
                     chargePointState.chargeSpeed = null;
                     broadcastToDashboards({ type: 'transactionStop', id: chargePointId, transactionId: null });
@@ -760,7 +815,25 @@ wss.on('connection', async (ws, req) => {
                     broadcastToDashboards({ type: 'speedUpdate', id: chargePointId, speed: speed });
                     updateOpcuaVariables(chargePointId, { ChargeSpeed: payload.data });
                 }
-
+                else if (action === 'DataTransfer' && payload.vendorId === 'OCPP_Simulator' && payload.messageId === 'SetInitialSoC') {
+                    const appSoc = parseFloat(payload.data);
+                    console.log(`[Master] Nhận Initial SoC từ App ${chargePointId}: ${appSoc}%`);
+                    // Chỉ cập nhật nếu không đang sạc (để tránh làm nhảy số giữa chừng nếu app reconnect sai)
+                    if (!chargePointState.transactionId && chargePointState.status !== 'Charging') {
+                         chargePointState.initialSoc = appSoc;
+                         chargePointState.soc = appSoc;
+                         
+                         // Cập nhật ngay lên Dashboard để hiển thị đúng
+                         broadcastToDashboards({ 
+                            type: 'meterValue', 
+                            id: chargePointState.id, 
+                            value: chargePointState.energy, 
+                            soc: chargePointState.soc, 
+                            timeRemaining: chargePointState.timeRemaining,
+                            electricalParams: calculateServerElectricalParams(chargePointState)
+                        });
+                    }
+                }
                 broadcastToDashboards({ type: 'log', direction: 'request', chargePointId, message: parsedMessage });
             } catch (e) { }
 
@@ -796,7 +869,7 @@ wss.on('connection', async (ws, req) => {
                              if (chargePointState) {
                                  chargePointState.transactionId = payload.transactionId;
                                  chargePointState.energy = 0;
-                                 chargePointState.soc = DEFAULT_START_SOC;
+                                 chargePointState.soc = chargePointState.initialSoc || DEFAULT_START_SOC;
                                  chargePointState.timeRemaining = '--:--:--';
                                  
                                  db.startTransaction(chargePointId, payload.transactionId, "UNKNOWN_TAG", 0);
@@ -884,7 +957,8 @@ setInterval(() => {
         state.energy = (state.energy || 0) + addedWh;
 
         const addedSoc = (state.energy / 1000 / BATTERY_CAPACITY) * 100;
-        let currentSoc = DEFAULT_START_SOC + addedSoc;
+        let startSoc = state.initialSoc || DEFAULT_START_SOC;
+        let currentSoc = startSoc + addedSoc;
         if (currentSoc > 100) currentSoc = 100;
         state.soc = currentSoc.toFixed(0);
 

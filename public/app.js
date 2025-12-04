@@ -757,15 +757,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const s = status.toLowerCase();
             if (s === 'available' || s === 'preparing') {
+                this.state.transactionId = null;
                 this.dom.statusTag.classList.add('status-available');
                 this.stopSimulation(); 
             } else if (['charging', 'suspendedevse', 'suspendedev', 'finishing'].includes(s)) {
                 this.dom.statusTag.classList.add('status-charging');
                 this.startSimulation();
             } else if (s === 'faulted') {
+                this.state.transactionId = null;
                 this.dom.statusTag.classList.add('status-faulted');
                 this.stopSimulation();
             } else {
+                this.state.transactionId = null;
                 this.dom.statusTag.classList.add('status-disconnected');
                 this.stopSimulation();
             }
@@ -789,10 +792,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.className = 'action-btn main-action-btn stop-btn';
                 btn.disabled = false;
             } else {
-                btn.textContent = 'Start Charging';
-                btn.className = 'action-btn main-action-btn start-btn';
-                const isReady = this.state.status === 'Preparing' || this.state.status === 'Available';
-                btn.disabled = !isReady;
+                const isReady = this.state.status === 'Preparing';
+
+                if (isReady) {
+                    btn.className = 'action-btn main-action-btn start-btn';
+                    btn.disabled = false;
+                    btn.title = "";
+                } else {
+                    btn.className = 'action-btn main-action-btn'; 
+                    btn.disabled = true;
+                    btn.title = "";
+                }
             }
         }
 

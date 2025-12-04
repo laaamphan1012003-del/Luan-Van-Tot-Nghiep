@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Xóa thông tin lưu trữ để lần sau không tự connect nữa
             localStorage.removeItem('savedBackendUrl');
             localStorage.removeItem('savedChargeboxId');
+            localStorage.removeItem('currentPowerLevel');
 
             if (websocket) {
                 websocket.close();
@@ -61,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isScanning = false;
     let isReconnecting = false;
 
-    // --- TÍNH NĂNG MỚI: AUTO CONNECT ---
+    // --- AUTO CONNECT ---
     const savedUrl = localStorage.getItem('savedBackendUrl');
     const savedId = localStorage.getItem('savedChargeboxId');
     
@@ -209,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // QUAN TRỌNG: Lưu lại thông tin kết nối
+        // Lưu lại thông tin kết nối
         localStorage.setItem('savedBackendUrl', backendUrl);
         localStorage.setItem('savedChargeboxId', chargeboxId);
 
@@ -330,7 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.meterValueIntervalId = null;
             this.isPluggedIn = false;
             this.isEvReady = false;
-            this.isRestored = false; // Thêm: Cờ để track session restore
+            this.isRestored = false; // Cờ để track session restore
             
             // Charging parameters
             this.BATTERY_CAPACITY = 42; // kWh
@@ -346,8 +347,12 @@ document.addEventListener('DOMContentLoaded', () => {
             this.CHARGING_POWER = this.chargeSpeedOptions[this.selectedChargeSpeed].power;
             this.PRICE_PER_KWH = this.chargeSpeedOptions[this.selectedChargeSpeed].price;
             
-            // Load current power level from localStorage, default 26%
-            this.currentPowerLevel = parseInt(localStorage.getItem('currentPowerLevel') || '26');
+            // Battery levels
+            const randomSoC = Math.floor(Math.random() * (50 - 10 + 1)) + 10;
+            this.currentPowerLevel = parseInt(localStorage.getItem('currentPowerLevel')) || randomSoC;
+            
+            // Lưu lại ngay để nếu f5 thì vẫn giữ
+            localStorage.setItem('currentPowerLevel', this.currentPowerLevel.toString());
             this.targetPowerLevel = 100;
             
             this.chargingStartTime = null;
@@ -370,7 +375,18 @@ document.addEventListener('DOMContentLoaded', () => {
             this.cacheDOMElements();
             this.addEventListeners();
             this.updateStatusUI('Offline');
+            this.sendInitialSoC();
         }
+
+        sendInitialSoC() {
+        if (this.sendRequest) {
+            this.sendRequest("DataTransfer", {
+                vendorId: "OCPP_Simulator",
+                messageId: "SetInitialSoC",
+                data: this.currentPowerLevel.toString()
+            });
+        }
+    }
 
         createElement() {
             this.element = document.createElement('div');
@@ -972,6 +988,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     setTimeout(() => {
                         if (!this.isRestored && !this.transactionId) {
                             console.log("No session to restore. Setting to Available.");
+                            
+                            // Reset local state
+                            this.isPluggedIn = false;
+                            this.isEvReady = false;
+                            this.transactionId = null;
+                            
+                            // Reset UI
+                            if (this.dom.plugStatusBtn) {
+                                this.dom.plugStatusBtn.classList.remove('active');
+                                this.dom.plugStatusBtn.disabled = false;
+                            }
+                            if (this.dom.evStatusBtn) {
+                                this.dom.evStatusBtn.classList.remove('active');
+                                this.dom.evStatusBtn.disabled = true;
+                            }
+                            this.hidePaymentSection();
+                            this.hideChargingProgress();
+                            
+                            // Gửi trạng thái Available lên Server để confirm
                             this.sendRequest("StatusNotification", { connectorId: 1, status: "Available", errorCode: "NoError" });
                             this.updateStatusUI('Available');
                         }
@@ -1042,7 +1077,27 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (state.timeRemaining) {
                                 this.dom.timeRemaining.textContent = state.timeRemaining;
                             }
-                            
+                            if (state.status === 'Available' && this.transactionId) {
+                                console.log("SyncState Detect: Server đã dừng phiên sạc. Reset App về Available.");
+                                
+                                // 1. Xóa thông tin phiên sạc cục bộ
+                                this.transactionId = null;
+                                this.stopSendingMeterValues();
+                                this.hideChargingProgress();
+                                
+                                // 2. Cập nhật giao diện về Available (màu xanh lá)
+                                this.updateStatusUI('Available');
+                                
+                                // 3. Reset các nút trạng thái xe (để người dùng phải bấm lại từ đầu nếu muốn sạc tiếp)
+                                this.isEvReady = false;
+                                if (this.dom.evStatusBtn) {
+                                    this.dom.evStatusBtn.classList.remove('active');
+                                    this.dom.evStatusBtn.disabled = true; // Khóa nút Ready lại cho đến khi cắm lại
+                                }
+                                
+                                this.isPluggedIn = false;
+                                if (this.dom.plugStatusBtn) this.dom.plugStatusBtn.classList.remove('active');
+                            }
                             this.sendResponse(uniqueId, { status: "Accepted" });
                         } catch(e) {
                             console.error("Failed to process SyncState:", e);
@@ -1230,10 +1285,6 @@ document.addEventListener('DOMContentLoaded', () => {
         startSendingMeterValues(txId) {
             if (this.meterValueIntervalId) clearInterval(this.meterValueIntervalId);
             this.meterValueIntervalId = setInterval(() => {
-                // --- SỬA ĐỔI QUAN TRỌNG ---
-                // App KHÔNG TỰ TÍNH TOÁN CỘNG DỒN NỮA
-                // Chỉ cập nhật hiển thị công suất để tạo hiệu ứng "đang hoạt động"
-                // Giá trị này sẽ được cập nhật bởi gói tin 'SyncState' từ Server
                 const powerKw = this.CHARGING_POWER || 7.2;
                 
                 // Hiển thị công suất (kW)
@@ -1241,7 +1292,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.dom.powerValue.textContent = `${displayPowerKw.toFixed(1)} kW`;
                 
                 // (Tùy chọn) Gửi MeterValues để giữ kết nối với Server
-                // Nhưng KHÔNG được cộng dồn this.meterValue += ...
                 // this.sendRequest("MeterValues", {
                 //     connectorId: 1,
                 //     transactionId: txId,
