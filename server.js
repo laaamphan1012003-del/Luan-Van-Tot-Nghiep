@@ -1011,7 +1011,7 @@ wss.on('connection', async (ws, req) => {
                         chargePointState.transactionId = txId;
                         chargePointState.status = 'Charging';
                         chargePointState.energy = payload.meterStart || 0;
-                        chargePointState.initialSoc = DEFAULT_START_SOC; // Hoặc từ payload
+                        chargePointState.initialSoc = chargePointState.soc || DEFAULT_START_SOC; // Hoặc từ payload
 
                         // 3. Phản hồi lại cho Trạm sạc 
                         const response = [3, parsedMessage[1], {
