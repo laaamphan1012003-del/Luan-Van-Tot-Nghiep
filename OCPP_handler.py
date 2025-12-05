@@ -114,9 +114,7 @@ def handle_request(action, payload, unique_id):
     elif action == "RemoteStartTransaction":
         id_tag = payload.get('idTag', 'REMOTE_USER')
         
-        # Cập nhật trạng thái Python để luồng nền bắt đầu gửi MeterValues
-        new_tx_id = random.randint(10000, 99999)
-        client_state["transaction_id"] = new_tx_id
+        #Chờ server phản hồi rồi lưu ID
         client_state["is_charging"] = True 
 
         # 1. Chấp nhận lệnh
@@ -192,6 +190,13 @@ def main_loop():
                     # Delay nhỏ để server xử lý kịp thứ tự
                     if len(messages_to_send) > 1: 
                         time.sleep(0.1)
+                        
+            elif message_type_id == 3:
+                payload = msg[2]
+                
+                if "transactionId" in payload:
+                    server_tx_id = payload["transactionId"]
+                    client_state["transaction_id"] = server_tx_id
 
         except (json.JSONDecodeError, ValueError):
             pass # Bỏ qua lỗi parse để tránh crash script

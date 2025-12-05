@@ -54,6 +54,23 @@ function broadcastToDashboards(message) {
     });
 }
 
+// --- LOG TRAFFIC ---
+function logTraffic(chargePointId, direction, message) {
+    // 1. Hiện lên VS Code (Terminal)
+    const icon = direction === 'incoming' ? '<< From CP' : '>> To CP';
+    const color = direction === 'incoming' ? '\x1b[32m' : '\x1b[36m'; // Green vs Cyan
+    console.log(`${color}[${chargePointId}] ${icon}\x1b[0m`, JSON.stringify(message));
+
+    // 2. Gửi lên Dashboard (UI)
+    broadcastToDashboards({
+        type: 'log',
+        chargePointId: chargePointId,
+        direction: direction, // 'incoming' hoặc 'outgoing'
+        message: message,     // Nguyên mảng OCPP [Type, ID, Action, Payload]
+        timestamp: new Date().toISOString()
+    });
+}
+
 // Hàm helper format thời gian (HH:mm:ss)
 function formatTimeRemaining(hours) {
     if (!isFinite(hours) || hours < 0) return "--:--:--";
@@ -277,6 +294,7 @@ function attachTriggerLogic(chargePointId, varName, node, allNodes) {
                 const targetCP = clients.chargePoints.get(chargePointId);
                 if (targetCP && targetCP.ws && targetCP.ws.readyState === WebSocket.OPEN) {
                     const msg = [2, uuidv4(), "RemoteStartTransaction", { idTag: idTag, connectorId: 1 }];
+                    logTraffic(chargePointId, 'outgoing', msg);
                     targetCP.ws.send(JSON.stringify(msg));
                 } else {
                     console.log(`[OPC UA] Không thể Start: Trạm ${chargePointId} chưa kết nối WebSocket.`);
@@ -293,6 +311,7 @@ function attachTriggerLogic(chargePointId, varName, node, allNodes) {
                 const targetCP = clients.chargePoints.get(chargePointId);
                 if (targetCP && targetCP.state && targetCP.state.transactionId) {
                     const msg = [2, uuidv4(), "RemoteStopTransaction", { transactionId: targetCP.state.transactionId }];
+                    logTraffic(chargePointId, 'outgoing', msg);
                     targetCP.ws.send(JSON.stringify(msg));
                 }
                 setTimeout(() => node.setValueFromSource(new Variant({dataType: DataType.Boolean, value: false})), 500);
@@ -582,6 +601,7 @@ async function sendFullStatusToDashboard(ws) {
                 };
             }
         });
+        
         ws.send(JSON.stringify({ type: 'fullStatus', chargePoints: combinedList }));
     } catch (err) {
         console.error("Error sending full status:", err);
@@ -649,6 +669,7 @@ wss.on('connection', async (ws, req) => {
                                     const stopMsg = [2, uuidv4(), "RemoteStopTransaction", { 
                                         transactionId: txIdToStop 
                                     }];
+                                    logTraffic(chargePointId, 'outgoing', stopMsg);
                                     targetCP.ws.send(JSON.stringify(stopMsg));
                                     
                                     // Forward xuống Python (nếu có dùng song song)
@@ -693,6 +714,7 @@ wss.on('connection', async (ws, req) => {
                                             const forceStopMsg = [2, uuidv4(), "RemoteStopTransaction", { 
                                                 transactionId: params.transactionId || 0 
                                             }];
+                                            logTraffic(chargePointId, 'outgoing', forceStopMsg);
                                             targetCP.ws.send(JSON.stringify(forceStopMsg));
                                         }
                                     }
@@ -704,6 +726,7 @@ wss.on('connection', async (ws, req) => {
                         const ocppMessage = [2, uniqueId, command, ocppPayload];
                         
                         console.log(`[Master] Sending ${command} to Mobile App: ${chargePointId}`);
+                        logTraffic(chargePointId, 'outgoing', ocppMessage);
                         targetCP.ws.send(JSON.stringify(ocppMessage));
 
                         // Gửi trực tiếp xuống Python (để Python giả lập phản hồi)
@@ -860,251 +883,282 @@ wss.on('connection', async (ws, req) => {
             
             try {
                 const parsedMessage = JSON.parse(messageString);
-                const [,, action, payload] = parsedMessage;
+                logTraffic(chargePointId, 'incoming', parsedMessage);
+                const messageType = parsedMessage[0];
+                const uniqueId = parsedMessage[1];
+                
                 db.recordHeartbeat(chargePointId);
+                
+                if (messageType === 2) {
+                const action = parsedMessage[2];
+                const payload = parsedMessage[3];
 
-                if (action === 'BootNotification') {
-                    chargePointState.vendor = payload.chargePointVendor;
-                    chargePointState.model = payload.chargePointModel;
-                    
-                    // Chỉ set Available nếu KHÔNG phải là reconnect đang có session
-                    if (!isReconnection) {
-                        chargePointState.status = 'Available';
-                    }
-                    
-                    // Cập nhật thông tin vào DB
-                    db.updateChargePoint(chargePointId, chargePointState.vendor, chargePointState.model);
-                    const electricalParams = calculateServerElectricalParams(chargePointState);
-                    
-                    broadcastToDashboards({ 
-                        type: 'boot', 
-                        id: chargePointId, 
-                        state: {
-                            ...chargePointState,
-                            electricalParams: electricalParams 
+                    if (action === 'BootNotification') {
+                        chargePointState.vendor = payload.chargePointVendor;
+                        chargePointState.model = payload.chargePointModel;
+                        
+                        // Chỉ set Available nếu KHÔNG phải là reconnect đang có session
+                        if (!isReconnection) {
+                            chargePointState.status = 'Available';
                         }
-                    });
-                    updateOpcuaVariables(chargePointId, {
-                        Vendor: chargePointState.vendor,
-                        Model: chargePointState.model,
-                        Status: chargePointState.status
-                    });
-
-                    // *** GỬI LỆNH PHỤC HỒI ***
-                    if (isReconnection && chargePointState.transactionId) {
-                        console.log(`[Master] Gửi lệnh RestoreSession cho ${chargePointId}`);
-                        setTimeout(() => {
-                            if (ws.readyState === WebSocket.OPEN) {
-                                const restoreMsg = [2, uuidv4(), "DataTransfer", {
-                                    vendorId: "OCPP_Simulator",
-                                    messageId: "RestoreSession",
-                                    data: JSON.stringify({
-                                        status: chargePointState.status,
-                                        transactionId: chargePointState.transactionId,
-                                        energy: chargePointState.energy,
-                                        soc: chargePointState.soc,
-                                        timeRemaining: chargePointState.timeRemaining,
-                                        chargeSpeed: chargePointState.chargeSpeed
-                                    })
-                                }];
-                                ws.send(JSON.stringify(restoreMsg));
+                        
+                        // Cập nhật thông tin vào DB
+                        db.updateChargePoint(chargePointId, chargePointState.vendor, chargePointState.model);
+                        const electricalParams = calculateServerElectricalParams(chargePointState);
+                        
+                        broadcastToDashboards({ 
+                            type: 'boot', 
+                            id: chargePointId, 
+                            state: {
+                                ...chargePointState,
+                                electricalParams: electricalParams 
                             }
-                        }, 100);
+                        });
+                        updateOpcuaVariables(chargePointId, {
+                            Vendor: chargePointState.vendor,
+                            Model: chargePointState.model,
+                            Status: chargePointState.status
+                        });
+
+                        // *** GỬI LỆNH PHỤC HỒI ***
+                        if (isReconnection && chargePointState.transactionId) {
+                            console.log(`[Master] Gửi lệnh RestoreSession cho ${chargePointId}`);
+                            setTimeout(() => {
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    const restoreMsg = [2, uuidv4(), "DataTransfer", {
+                                        vendorId: "OCPP_Simulator",
+                                        messageId: "RestoreSession",
+                                        data: JSON.stringify({
+                                            status: chargePointState.status,
+                                            transactionId: chargePointState.transactionId,
+                                            energy: chargePointState.energy,
+                                            soc: chargePointState.soc,
+                                            timeRemaining: chargePointState.timeRemaining,
+                                            chargeSpeed: chargePointState.chargeSpeed
+                                        })
+                                    }];
+                                    logTraffic(chargePointId, 'outgoing', restoreMsg);
+                                    ws.send(JSON.stringify(restoreMsg));
+                                }
+                            }, 100);
+                        }
+
+                        const response = [
+                            3, 
+                            parsedMessage[1], 
+                            {
+                                status: "Accepted",
+                                currentTime: new Date().toISOString(), 
+                                interval: 300 // Giây (Heartbeat interval)
+                            }
+                        ];
+                        logTraffic(chargePointId, 'outgoing', response);
+                        ws.send(JSON.stringify(response));
+                    } 
+                    else if (action === 'StatusNotification') {
+                        // *** CHẶN LỆNH AVAILABLE NẾU ĐANG CÓ SESSION ***
+                        if (isReconnection && chargePointState.transactionId && payload.status === 'Available') {
+                            console.log(`[Master] CHẶN Status 'Available' từ ${chargePointId} vì đang có session ${chargePointState.transactionId}`);
+                            const restoreMsg = [2, uuidv4(), "DataTransfer", {
+                                vendorId: "OCPP_Simulator",
+                                messageId: "SyncState", // Dùng SyncState để app cập nhật lại
+                                data: JSON.stringify({
+                                    energy: chargePointState.energy,
+                                    soc: chargePointState.soc,
+                                    timeRemaining: chargePointState.timeRemaining,
+                                    status: chargePointState.status // Vẫn là Charging
+                                })
+                            }];
+                            logTraffic(chargePointId, 'outgoing', restoreMsg);
+                            ws.send(JSON.stringify(restoreMsg));
+
+                        } else {
+                            chargePointState.status = payload.status;
+                            const electricalParams = calculateServerElectricalParams(chargePointState);
+        
+                            broadcastToDashboards({ 
+                                type: 'status', 
+                                id: chargePointId, 
+                                status: chargePointState.status,
+                                electricalParams: electricalParams
+                            });
+                            updateOpcuaVariables(chargePointId, { Status: chargePointState.status });
+                        }
+                    } 
+                    else if (action === 'StartTransaction') {
+                        console.log(`[Master] Nhận StartTransaction từ ${chargePointId}`);
+                        
+                        // 1. Tạo Transaction ID (Giả lập hoặc lấy từ DB)
+                        const txId = Math.floor(Date.now() / 1000); 
+
+                        try {
+                            if (db.startTransaction) {
+                                // FIX: Đổi thứ tự tham số cho khớp với database.js
+                                // database.js: async function startTransaction(chargePointId, transactionId, idTag, meterStart)
+                                await db.startTransaction(
+                                    chargePointId,            // Tham số 1: ID trạm
+                                    txId,                     // Tham số 2: ID giao dịch
+                                    payload.idTag,            // Tham số 3: Thẻ ID
+                                    payload.meterStart || 0   // Tham số 4: Đồng hồ bắt đầu
+                                );
+                                console.log(`[Database] Đã tạo transaction mới: ${txId}`);
+                            }
+                        } catch (dbErr) {
+                            console.error("[Database] Lỗi khi tạo transaction:", dbErr);
+                        }
+
+                        // 2. Cập nhật trạng thái Server
+                        chargePointState.transactionId = txId;
+                        chargePointState.status = 'Charging';
+                        chargePointState.energy = payload.meterStart || 0;
+                        chargePointState.initialSoc = DEFAULT_START_SOC; // Hoặc từ payload
+
+                        // 3. Phản hồi lại cho Trạm sạc 
+                        const response = [3, parsedMessage[1], {
+                            transactionId: txId,
+                            idTagInfo: { status: "Accepted" }
+                        }];
+                        logTraffic(chargePointId, 'outgoing', response);
+                        ws.send(JSON.stringify(response));
+
+                        // 4. Cập nhật lên Dashboard 
+                        broadcastToDashboards({
+                            type: 'transactionStart',
+                            id: chargePointId,
+                            transactionId: txId,
+                            status: 'Charging',
+                            state: chargePointState
+                        });
+
+                        // 5. Cập nhật OPC UA
+                        updateOpcuaVariables(chargePointId, {
+                            TransactionID: txId,
+                            Status: 'Charging'
+                        });
                     }
-                } 
-                else if (action === 'StatusNotification') {
-                    // *** CHẶN LỆNH AVAILABLE NẾU ĐANG CÓ SESSION ***
-                    if (isReconnection && chargePointState.transactionId && payload.status === 'Available') {
-                        console.log(`[Master] CHẶN Status 'Available' từ ${chargePointId} vì đang có session ${chargePointState.transactionId}`);
-                        const restoreMsg = [2, uuidv4(), "DataTransfer", {
-                            vendorId: "OCPP_Simulator",
-                            messageId: "SyncState", // Dùng SyncState để app cập nhật lại
-                            data: JSON.stringify({
-                                energy: chargePointState.energy,
+                    else if (action === 'StopTransaction') {
+                        // Logic dừng sạc bình thường
+                        const txId = chargePointState.transactionId || payload.transactionId;                    // Sử dụng chargePointState thay vì state
+                        const svEnergy = chargePointState.energy || 0;
+                        const meterStop = (payload.meterStop && payload.meterStop > 0) ? payload.meterStop : svEnergy;
+                        
+                        if (txId && !String(txId).toString().includes('RESTORED')) {
+                            await db.stopTransaction(txId, meterStop);
+                        }
+
+                        // Cập nhật trạng thái Server
+                        chargePointState.transactionId = null;
+                        chargePointState.energy = 0;
+                        chargePointState.initialSoc = DEFAULT_START_SOC;
+                        chargePointState.timeRemaining = '--:--:--';
+                        chargePointState.chargeSpeed = null;
+
+                        // Cập nhật DB trạng thái trạm
+                        chargePointState.status = 'Finishing';
+                        broadcastToDashboards({ type: 'transactionStop', id: chargePointId, transactionId: null });
+                        broadcastToDashboards({ type: 'meterValue', id: chargePointId, value: 0, soc: DEFAULT_START_SOC, timeRemaining: '--:--:--' });
+                        broadcastToDashboards({ type: 'speedUpdate', id: chargePointId, speed: null });
+                        updateOpcuaVariables(chargePointId, { 
+                            TransactionID: 0, 
+                            Energy_kWh: 0,
+                            Status: 'Finishing'
+                        });
+                        const response = [3, parsedMessage[1], { idTagInfo: { status: "Accepted" } }];
+                        logTraffic(chargePointId, 'outgoing', response);
+                        ws.send(JSON.stringify(response));
+                    }
+                    else if (action === 'MeterValues') {
+                        console.log(`[Master] Nhận MeterValues từ ${chargePointId}`);
+                        const response = [3, parsedMessage[1], {}];
+                        logTraffic(chargePointId, 'outgoing', response);
+                        ws.send(JSON.stringify(response));
+
+                        // 2. Phân tích dữ liệu từ payload
+                        const meterValues = payload.meterValue;
+                        if (meterValues && meterValues.length > 0) {
+                            // Lấy mẫu đo mới nhất
+                            const latestSample = meterValues[meterValues.length - 1].sampledValue;
+                            
+                            // Tìm các giá trị quan trọng (Energy, SoC...)
+                            const energyObj = latestSample.find(s => s.measurand === 'Energy.Active.Import.Register' || (!s.measurand && s.unit === 'Wh'));
+                            const socObj = latestSample.find(s => s.measurand === 'SoC');
+
+                            // 3. Cập nhật State của Server
+                            if (energyObj) {
+                                chargePointState.energy = parseFloat(energyObj.value);
+                                chargePointState.lastSimTime = Date.now(); 
+                            }
+                            if (socObj) chargePointState.soc = parseFloat(socObj.value);
+                            
+                            // Tính toán electricalParams để gửi lên Dashboard và OPC UA
+                            const electricalParams = calculateServerElectricalParams(chargePointState);
+
+                            // 4. Cập nhật OPC UA (Real-time monitoring)
+                            const opcData = {
+                                Power_Total: electricalParams.p_total,
+                                ReActivePower_Total: electricalParams.q_total,
+                                PF: electricalParams.pf,
+                                Current_Total: electricalParams.i_sum,
+                                Current_a: electricalParams.ia,
+                                Current_b: electricalParams.ib,
+                                Current_c: electricalParams.ic,
+                                Voltage_Average: electricalParams.v_avg,
+                                Voltage_ab: electricalParams.vab,
+                                Voltage_bc: electricalParams.vbc,
+                                Voltage_ac: electricalParams.vca
+                            };
+                            
+                            if (energyObj) opcData.Energy_kWh = parseFloat(energyObj.value) / 1000;
+                            if (socObj) opcData.SoC = parseFloat(socObj.value);
+                            
+                            updateOpcuaVariables(chargePointId, opcData);
+
+                            // 5. Gửi dữ liệu mới lên Dashboard
+                            broadcastToDashboards({
+                                type: 'meterValue',
+                                id: chargePointId,
+                                value: chargePointState.energy,
                                 soc: chargePointState.soc,
                                 timeRemaining: chargePointState.timeRemaining,
-                                status: chargePointState.status // Vẫn là Charging
-                            })
-                        }];
-                        ws.send(JSON.stringify(restoreMsg));
-
-                    } else {
-                        chargePointState.status = payload.status;
-                        const electricalParams = calculateServerElectricalParams(chargePointState);
-    
-                        broadcastToDashboards({ 
-                            type: 'status', 
-                            id: chargePointId, 
-                            status: chargePointState.status,
-                            electricalParams: electricalParams
-                        });
-                        updateOpcuaVariables(chargePointId, { Status: chargePointState.status });
-                    }
-                } 
-                else if (action === 'StartTransaction') {
-                    console.log(`[Master] Nhận StartTransaction từ ${chargePointId}`);
-                    
-                    // 1. Tạo Transaction ID (Giả lập hoặc lấy từ DB)
-                    const txId = Math.floor(Date.now() / 1000); 
-
-                    try {
-                        if (db.startTransaction) {
-                            // FIX: Đổi thứ tự tham số cho khớp với database.js
-                            // database.js: async function startTransaction(chargePointId, transactionId, idTag, meterStart)
-                            await db.startTransaction(
-                                chargePointId,            // Tham số 1: ID trạm
-                                txId,                     // Tham số 2: ID giao dịch
-                                payload.idTag,            // Tham số 3: Thẻ ID
-                                payload.meterStart || 0   // Tham số 4: Đồng hồ bắt đầu
-                            );
-                            console.log(`[Database] Đã tạo transaction mới: ${txId}`);
+                                electricalParams: electricalParams, 
+                                ocppStandardJson: parsedMessage 
+                            });
                         }
-                    } catch (dbErr) {
-                        console.error("[Database] Lỗi khi tạo transaction:", dbErr);
                     }
-
-                    // 2. Cập nhật trạng thái Server
-                    chargePointState.transactionId = txId;
-                    chargePointState.status = 'Charging';
-                    chargePointState.energy = payload.meterStart || 0;
-                    chargePointState.initialSoc = DEFAULT_START_SOC; // Hoặc từ payload
-
-                    // 3. Phản hồi lại cho Trạm sạc 
-                    const response = [3, parsedMessage[1], {
-                        transactionId: txId,
-                        idTagInfo: { status: "Accepted" }
-                    }];
-                    ws.send(JSON.stringify(response));
-
-                    // 4. Cập nhật lên Dashboard 
-                    broadcastToDashboards({
-                        type: 'transactionStart',
-                        id: chargePointId,
-                        transactionId: txId,
-                        status: 'Charging',
-                        state: chargePointState
-                    });
-
-                    // 5. Cập nhật OPC UA
-                    updateOpcuaVariables(chargePointId, {
-                        TransactionID: txId,
-                        Status: 'Charging'
-                    });
-                }
-                else if (action === 'StopTransaction') {
-                    // Logic dừng sạc bình thường
-                    const txId = chargePointState.transactionId || payload.transactionId;                    // Sử dụng chargePointState thay vì state
-                    const svEnergy = chargePointState.energy || 0;
-                    const meterStop = (payload.meterStop && payload.meterStop > 0) ? payload.meterStop : svEnergy;
-                    
-                    if (txId && !String(txId).toString().includes('RESTORED')) {
-                        await db.stopTransaction(txId, meterStop);
+                    else if (action === 'DataTransfer' && payload.vendorId === 'ChargingSpeed') {
+                        const speed = payload.data;
+                        console.log(`[Master] Nhận tốc độ sạc từ ${chargePointId}: ${speed}`);
+                        chargePointState.chargeSpeed = speed;
+                        broadcastToDashboards({ type: 'speedUpdate', id: chargePointId, speed: speed });
+                        updateOpcuaVariables(chargePointId, { ChargeSpeed: payload.data });
                     }
-
-                    // Cập nhật trạng thái Server
-                    chargePointState.transactionId = null;
-                    chargePointState.energy = 0;
-                    chargePointState.initialSoc = DEFAULT_START_SOC;
-                    chargePointState.timeRemaining = '--:--:--';
-                    chargePointState.chargeSpeed = null;
-
-                    // Cập nhật DB trạng thái trạm
-                    chargePointState.status = 'Finishing';
-                    broadcastToDashboards({ type: 'transactionStop', id: chargePointId, transactionId: null });
-                    broadcastToDashboards({ type: 'meterValue', id: chargePointId, value: 0, soc: DEFAULT_START_SOC, timeRemaining: '--:--:--' });
-                    broadcastToDashboards({ type: 'speedUpdate', id: chargePointId, speed: null });
-                    updateOpcuaVariables(chargePointId, { 
-                        TransactionID: 0, 
-                        Energy_kWh: 0,
-                        Status: 'Finishing'
-                    });
-                    const response = [3, parsedMessage[1], { idTagInfo: { status: "Accepted" } }];
-                    ws.send(JSON.stringify(response));
-                }
-                else if (action === 'MeterValues') {
-                    console.log(`[Master] Nhận MeterValues từ ${chargePointId}`);
-                    const response = [3, parsedMessage[1], {}];
-                    ws.send(JSON.stringify(response));
-
-                    // 2. Phân tích dữ liệu từ payload
-                    const meterValues = payload.meterValue;
-                    if (meterValues && meterValues.length > 0) {
-                        // Lấy mẫu đo mới nhất
-                        const latestSample = meterValues[meterValues.length - 1].sampledValue;
-                        
-                        // Tìm các giá trị quan trọng (Energy, SoC...)
-                        const energyObj = latestSample.find(s => s.measurand === 'Energy.Active.Import.Register' || (!s.measurand && s.unit === 'Wh'));
-                        const socObj = latestSample.find(s => s.measurand === 'SoC');
-
-                        // 3. Cập nhật State của Server
-                        if (energyObj) {
-                            chargePointState.energy = parseFloat(energyObj.value);
-                            chargePointState.lastSimTime = Date.now(); 
+                    else if (action === 'DataTransfer' && payload.vendorId === 'OCPP_Simulator' && payload.messageId === 'SetInitialSoC') {
+                        const appSoc = parseFloat(payload.data);
+                        console.log(`[Master] Nhận Initial SoC từ App ${chargePointId}: ${appSoc}%`);
+                        // Chỉ cập nhật nếu không đang sạc (để tránh làm nhảy số giữa chừng nếu app reconnect sai)
+                        if (!chargePointState.transactionId && chargePointState.status !== 'Charging') {
+                            chargePointState.initialSoc = appSoc;
+                            chargePointState.soc = appSoc;
+                            
+                            // Cập nhật ngay lên Dashboard để hiển thị đúng
+                            broadcastToDashboards({ 
+                                type: 'meterValue', 
+                                id: chargePointState.id, 
+                                value: chargePointState.energy, 
+                                soc: chargePointState.soc, 
+                                timeRemaining: chargePointState.timeRemaining,
+                                electricalParams: calculateServerElectricalParams(chargePointState)
+                            });
                         }
-                        if (socObj) chargePointState.soc = parseFloat(socObj.value);
-                        
-                        // Tính toán electricalParams để gửi lên Dashboard và OPC UA
-                        const electricalParams = calculateServerElectricalParams(chargePointState);
-
-                        // 4. Cập nhật OPC UA (Real-time monitoring)
-                        const opcData = {
-                            Power_Total: electricalParams.p_total,
-                            ReActivePower_Total: electricalParams.q_total,
-                            PF: electricalParams.pf,
-                            Current_Total: electricalParams.i_sum,
-                            Current_a: electricalParams.ia,
-                            Current_b: electricalParams.ib,
-                            Current_c: electricalParams.ic,
-                            Voltage_Average: electricalParams.v_avg,
-                            Voltage_ab: electricalParams.vab,
-                            Voltage_bc: electricalParams.vbc,
-                            Voltage_ac: electricalParams.vca
-                        };
-                        
-                        if (energyObj) opcData.Energy_kWh = parseFloat(energyObj.value) / 1000;
-                        if (socObj) opcData.SoC = parseFloat(socObj.value);
-                        
-                        updateOpcuaVariables(chargePointId, opcData);
-
-                        // 5. Gửi dữ liệu mới lên Dashboard
-                        broadcastToDashboards({
-                            type: 'meterValue',
-                            id: chargePointId,
-                            value: chargePointState.energy,
-                            soc: chargePointState.soc,
-                            timeRemaining: chargePointState.timeRemaining,
-                            electricalParams: electricalParams, 
-                            ocppStandardJson: parsedMessage 
-                        });
                     }
+                    broadcastToDashboards({ type: 'log', direction: 'request', chargePointId, message: parsedMessage });
                 }
-                else if (action === 'DataTransfer' && payload.vendorId === 'ChargingSpeed') {
-                    const speed = payload.data;
-                    console.log(`[Master] Nhận tốc độ sạc từ ${chargePointId}: ${speed}`);
-                    chargePointState.chargeSpeed = speed;
-                    broadcastToDashboards({ type: 'speedUpdate', id: chargePointId, speed: speed });
-                    updateOpcuaVariables(chargePointId, { ChargeSpeed: payload.data });
+                else if (messageType === 3) {
+                    console.log(`[Server] Nhận phản hồi (Response) từ ${chargePointId} cho Request ID ${uniqueId}`);
                 }
-                else if (action === 'DataTransfer' && payload.vendorId === 'OCPP_Simulator' && payload.messageId === 'SetInitialSoC') {
-                    const appSoc = parseFloat(payload.data);
-                    console.log(`[Master] Nhận Initial SoC từ App ${chargePointId}: ${appSoc}%`);
-                    // Chỉ cập nhật nếu không đang sạc (để tránh làm nhảy số giữa chừng nếu app reconnect sai)
-                    if (!chargePointState.transactionId && chargePointState.status !== 'Charging') {
-                         chargePointState.initialSoc = appSoc;
-                         chargePointState.soc = appSoc;
-                         
-                         // Cập nhật ngay lên Dashboard để hiển thị đúng
-                         broadcastToDashboards({ 
-                            type: 'meterValue', 
-                            id: chargePointState.id, 
-                            value: chargePointState.energy, 
-                            soc: chargePointState.soc, 
-                            timeRemaining: chargePointState.timeRemaining,
-                            electricalParams: calculateServerElectricalParams(chargePointState)
-                        });
-                    }
+                else if (messageType === 4) {
+                    console.error(`[Server] Nhận thông báo LỖI từ ${chargePointId} cho ID ${uniqueId}`);
                 }
-                broadcastToDashboards({ type: 'log', direction: 'request', chargePointId, message: parsedMessage });
             } catch (e) { 
             console.error(`[WEBSOCKET ERROR] Lỗi xử lý tin nhắn từ ${chargePointId}:`, e);
             }
@@ -1128,9 +1182,10 @@ wss.on('connection', async (ws, req) => {
                 const responseString = pythonBuffer.substring(0, newlineIndex).trim();
                 pythonBuffer = pythonBuffer.substring(newlineIndex + 1);
 
-                if (responseString) {
-                    console.log(`[Python -> Master] Received response for ${chargePointId}: ${responseString}`);
-                    ws.send(responseString);
+                try {
+                    logTraffic(chargePointId, 'incoming', JSON.parse(responseString));
+                } catch(e) {}
+                ws.send(responseString);
                     
                     try {
                         const responseJson = JSON.parse(responseString);
@@ -1170,7 +1225,7 @@ wss.on('connection', async (ws, req) => {
                     }
                 }
             }
-        });
+        );
 
         pythonHandler.stderr.on('data', (data) => {
             console.error(`[Python stderr for ${chargePointId}]: ${data.toString()}`);
@@ -1301,6 +1356,7 @@ setInterval(() => {
                     power: electricalParams.p_total
                 })
             }];
+            logTraffic(state.id, 'outgoing', syncMsg);
             cp.ws.send(JSON.stringify(syncMsg));
         }
     });
