@@ -60,6 +60,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const globalLogBody = document.getElementById('global-log-body');
     const MAX_LOG_ROWS = 100;
 
+    let currentChartRange = '1d';
+
     // Mapping từ tốc độ sạc sang số pha (Load) hoạt động
     const SPEED_TO_LOADS = {
         'normal': [true, false, false],     // Load 1 only
@@ -122,19 +124,34 @@ document.addEventListener('DOMContentLoaded', () => {
     
     window.loadSqlData = async function() {
         const tbody = document.getElementById('sql-table-body');
+        const dateInput = document.getElementById('search-date');
+        
         if (!tbody) return;
         
         tbody.innerHTML = '<tr><td colspan="6" class="table-message loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading data...</td></tr>';
+        
         try {
-            const response = await fetch('/api/history');
+            // Logic lấy URL
+            let url = '/api/history';
+            if (dateInput && dateInput.value) {
+                const start = `${dateInput.value}T00:00:00`;
+                const end = `${dateInput.value}T23:59:59`;
+                url = `/api/history?start=${start}&end=${end}`;
+            }
+
+            const response = await fetch(url);
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             
             currentSqlData = await response.json();
+            
+            // Xóa bộ lọc cũ để thấy dữ liệu ngay
+            if(document.getElementById('search-tx-id')) document.getElementById('search-tx-id').value = ''; 
+            
             filterAndRenderSqlData();
     
         } catch (err) {
             console.error('Error fetching SQL data:', err);
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#de350b;">Error loading data. Check Server/Database connection.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#de350b;">Connection Error.</td></tr>';
         }
     }
 
@@ -277,6 +294,91 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    function updateRealTimeCharts(cpId) {
+        // 1. Cập nhật Pie Chart (Tổng số phiên sạc)
+        if (usageCountChart) {
+            const labels = usageCountChart.data.labels;
+            const dataIdx = labels.indexOf(cpId);
+            
+            if (dataIdx !== -1) {
+                // Nếu trạm đã có trong biểu đồ, tăng số lượng
+                usageCountChart.data.datasets[0].data[dataIdx] += 1;
+            } else {
+                // Nếu trạm chưa có (trạm mới), thêm vào
+                usageCountChart.data.labels.push(cpId);
+                usageCountChart.data.datasets[0].data.push(1);
+                // Thêm màu ngẫu nhiên hoặc lấy từ mảng mẫu
+                const bgColors = ['#0052cc', '#00875a', '#de350b', '#ff991f', '#5243aa', '#00b8d9', '#36b37e'];
+                const nextColor = bgColors[usageCountChart.data.datasets[0].backgroundColor.length % bgColors.length];
+                usageCountChart.data.datasets[0].backgroundColor.push(nextColor);
+            }
+            
+            // Cập nhật số tổng hiển thị
+            const totalDisplay = document.getElementById('total-sessions-display');
+            if (totalDisplay) {
+                const currentTotal = usageCountChart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                totalDisplay.innerHTML = `Total Sessions: ${currentTotal}`;
+            }
+            usageCountChart.update();
+        }
+
+        // 2. Cập nhật Line Chart (Chỉ hiệu quả khi đang xem View 1D - Theo giờ)
+        // Nếu đang xem 1 tuần/1 tháng thì nên reload lại data từ server để chính xác hơn
+        if (currentChartRange !== '1d') {
+            updateCharts(currentChartRange); // Gọi reload data thường
+            return;
+        }
+
+        if (usageTimeChart) {
+            const now = new Date();
+            const currentHourKey = now.getHours() + ":00"; // Ví dụ: "16:00"
+            
+            let labelIndex = usageTimeChart.data.labels.indexOf(currentHourKey);
+
+            // Trường hợp 1: Giờ hiện tại chưa có trên trục X (Ví dụ bước sang giờ mới)
+            if (labelIndex === -1) {
+                usageTimeChart.data.labels.push(currentHourKey);
+                // Sắp xếp lại label theo thứ tự thời gian (số nguyên)
+                usageTimeChart.data.labels.sort((a, b) => parseInt(a) - parseInt(b));
+                
+                // Lấy lại index sau khi sort
+                labelIndex = usageTimeChart.data.labels.indexOf(currentHourKey);
+
+                // Thêm dữ liệu 0 cho giờ mới vào TẤT CẢ các dataset để tránh lỗi
+                usageTimeChart.data.datasets.forEach(dataset => {
+                    // Chèn số 0 vào đúng vị trí index
+                    dataset.data.splice(labelIndex, 0, 0);
+                });
+            }
+
+            // Trường hợp 2: Tìm dataset của trạm đang sạc (cpId)
+            let dataset = usageTimeChart.data.datasets.find(ds => ds.label === cpId);
+
+            if (dataset) {
+                // Tăng giá trị tại khung giờ hiện tại
+                dataset.data[labelIndex] += 1;
+            } else {
+                // Nếu dataset của trạm này chưa tồn tại (trạm mới), tạo mới
+                const bgColors = ['#0052cc', '#00875a', '#de350b', '#ff991f', '#5243aa', '#00b8d9', '#36b37e'];
+                const newColor = bgColors[usageTimeChart.data.datasets.length % bgColors.length];
+                
+                const newData = new Array(usageTimeChart.data.labels.length).fill(0);
+                newData[labelIndex] = 1;
+
+                usageTimeChart.data.datasets.push({
+                    label: cpId,
+                    data: newData,
+                    borderColor: newColor,
+                    backgroundColor: newColor,
+                    tension: 0.1,
+                    fill: false
+                });
+            }
+
+            usageTimeChart.update();
+        }
+    }    
+
     function renderCharts(data, range) {
         const ctxUsage = document.getElementById('usageCountChart').getContext('2d');
         const ctxEnergy = document.getElementById('energyChart').getContext('2d');
@@ -285,8 +387,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // Process Data
         const stationCounts = {};
         const stationEnergy = {};
-        const timeLabels = [];
+        let timeLabels = [];
         const stationTimeData = {}; 
+
+        if (range === '1d') {
+            // Nếu xem theo ngày: Tạo cứng danh sách từ 0:00 đến 23:00
+            for (let i = 0; i < 24; i++) {
+                timeLabels.push(`${i}:00`);
+            }
+        }
 
         // Aggregation logic
         data.forEach(tx => {
@@ -309,13 +418,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!stationTimeData[cp]) stationTimeData[cp] = {};
             stationTimeData[cp][timeKey] = (stationTimeData[cp][timeKey] || 0) + 1;
             
-            if (!timeLabels.includes(timeKey)) timeLabels.push(timeKey);
+            if (range !== '1d' && !timeLabels.includes(timeKey)) {
+                timeLabels.push(timeKey);
+            }
         });
 
         // Sort time labels
-        if (range === '1d') {
-             timeLabels.sort((a, b) => parseInt(a) - parseInt(b));
-        } else {
+        if (range !== '1d') {
              timeLabels.sort();
         }
 
@@ -699,6 +808,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (this.state.chargeSpeed) {
                 this.setActivePhasesBySpeed(this.state.chargeSpeed);
             }
+
+            if (this.state.electricalParams) {
+                this.renderElectricalParameters(this.state.electricalParams);
+            }
         }
 
         // Thiết lập các pha (Load) hoạt động dựa trên tốc độ sạc từ mobile app
@@ -795,6 +908,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isReady = this.state.status === 'Preparing';
 
                 if (isReady) {
+                    btn.textContent = 'Start Charging'
                     btn.className = 'action-btn main-action-btn start-btn';
                     btn.disabled = false;
                     btn.title = "";
@@ -810,6 +924,10 @@ document.addEventListener('DOMContentLoaded', () => {
             this.state.energy = wh;
             const kwh = (wh / 1000).toFixed(2);
             this.dom.energyInfo.textContent = `${kwh} kWh`;
+        }
+
+        updateSoC(soc) {
+            this.state.soc = soc;
         }
 
         startSimulation() {
@@ -828,25 +946,26 @@ document.addEventListener('DOMContentLoaded', () => {
         renderElectricalParameters(params) {
             if (!params) return;
 
+            const val = (v) => (v !== undefined && v !== null) ? v : 0;
+
             // Truy cập đúng thuộc tính trong params, không dùng biến chưa định nghĩa
-            this.dom.vVal.textContent = `${params.v_avg} V`;
-            this.dom.vabVal.textContent = `${params.vab} V`;
-            this.dom.vbcVal.textContent = `${params.vbc} V`;
-            this.dom.vcaVal.textContent = `${params.vca} V`;
+            this.dom.vVal.textContent = `${val(params.v_avg)} V`;
+            this.dom.vabVal.textContent = `${val(params.vab)} V`;
+            this.dom.vbcVal.textContent = `${val(params.vbc)} V`;
+            this.dom.vcaVal.textContent = `${val(params.vca)} V`;
 
-            this.dom.iVal.textContent = `${params.i_sum} A`;
-            this.dom.iaVal.textContent = `${params.ia} A`;
-            this.dom.ibVal.textContent = `${params.ib} A`;
-            this.dom.icVal.textContent = `${params.ic} A`;
+            this.dom.iVal.textContent = `${val(params.i_sum)} A`;
+            this.dom.iaVal.textContent = `${val(params.ia)} A`;
+            this.dom.ibVal.textContent = `${val(params.ib)} A`;
+            this.dom.icVal.textContent = `${val(params.ic)} A`;
 
-            this.dom.pVal.textContent = `${params.p_total} kW`;
-            this.dom.qVal.textContent = `${params.q_total} kVAR`;
-            this.dom.pfVal.textContent = `${params.pf}`;
+            this.dom.pVal.textContent = `${val(params.p_total)} kW`;
+            this.dom.qVal.textContent = `${val(params.q_total)} kVAR`;
+            this.dom.pfVal.textContent = `${val(params.pf)}`;
 
             // Logic cập nhật số kWh khi không sạc (để hiển thị con số cuối cùng)
-            if (this.state.status !== 'Charging') {
-                const kwh = (this.state.energy || 0) / 1000;
-                this.dom.energyInfo.textContent = `${kwh.toFixed(2)} kWh`;
+            if (this.state.status !== 'Charging' && params.Energy_kWh !== undefined) {
+                this.dom.energyInfo.textContent = `${params.Energy_kWh.toFixed(2)} kWh`;
             }
         }
 
@@ -859,72 +978,192 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function connectDashboard() {
-        const wsUrl = `ws://${window.location.host}/dashboard`;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/dashboard`;
+        
+        console.log(`[Dashboard] Connecting to ${wsUrl}...`);
+        
+        if (ws) ws.close();
         ws = new WebSocket(wsUrl);
 
-        ws.onopen = () => console.log("Dashboard connected.");
-        
+        ws.onopen = () => {
+            console.log('[Dashboard] Connected to CSMS');
+            const statusBadge = document.getElementById('connection-status');
+            if (statusBadge) {
+                statusBadge.textContent = 'Connected';
+                statusBadge.className = 'badge bg-success';
+            }
+        };
+
         ws.onmessage = (event) => {
             try {
-                const data = JSON.parse(event.data);
-                const { type, id } = data;
+                const parsedMessage = JSON.parse(event.data);
+                const { type, ...data } = parsedMessage;
 
+                // 1. Xử lý trạng thái đầy đủ ban đầu
+                if (type === 'fullStatus') {
+                    console.log("[Dashboard] Received full status:", data.chargePoints);
+                    
+                    // Clear UI cũ
+                    if(chargersContainer) chargersContainer.innerHTML = '';
+                    chargePointCards.clear();
+                    
+                    // Tạo thẻ cho từng trạm
+                    if (data.chargePoints && Array.isArray(data.chargePoints)) {
+                        data.chargePoints.forEach(cp => {
+                            // Tạo instance từ Class ChargePointCard đã có
+                            const card = new ChargePointCard(cp.id, cp);
+                            chargePointCards.set(cp.id, card);
+                        });
+                    }
+                    return;
+                }
+                
+                // 2. Xử lý Log (Global Log)
                 if (type === 'log') {
                     addLogRow(data);
                     return;
                 }
-                
-                if (type === 'fullStatus') {
-                    chargersContainer.innerHTML = '';
-                    chargePointCards.clear();
-                    data.chargePoints.forEach(cpState => {
-                        if (!chargePointCards.has(cpState.id)) {
-                            const card = new ChargePointCard(cpState.id, cpState);
-                            chargePointCards.set(cpState.id, card);
-                        }
-                    });
-                    return;
-                }
-                
-                if (!id) return;
 
-                let card = chargePointCards.get(id);
-                if (!card && (type === 'connect' || type === 'boot')) {
-                    card = new ChargePointCard(data.id, data.state);
+                // 3. Xử lý cập nhật trạng thái trạm
+                let card = chargePointCards.get(data.id);
+
+                if (!card && (type === 'connect' || type === 'boot' || type === 'status')) {
+                    console.log(`[Dashboard] New station detected: ${data.id}`);
+                    const initialState = data.state || { id: data.id, status: data.status || 'Available' };
+                    card = new ChargePointCard(data.id, initialState);
                     chargePointCards.set(data.id, card);
                 }
-                
+
                 if (!card) return;
 
-                if (type === 'connect' || type === 'boot') card.updateAll(data.state);
-                if (type === 'disconnect') card.updateConnectionStatus(false);
-                if (type === 'status') card.updateStatus(data.status);
-                if (type === 'transactionStart') card.updateTransaction(data.transactionId);
-                if (type === 'transactionStop') card.updateTransaction(null);
+                // --- Cập nhật dữ liệu vào thẻ ---
+                if (type === 'connect' || type === 'boot') {
+                    card.updateAll(data.state);
+                    card.updateConnectionStatus(true);
+                    if (data.state.electricalParams) {
+                        card.renderElectricalParameters(data.state.electricalParams);
+                    }
+                }
+                
+                if (type === 'disconnect') {
+                    card.updateConnectionStatus(false);
+                    setTimeout(() => {
+                        // Chỉ thực hiện nếu thẻ vẫn tồn tại và đang ở trạng thái Disconnected
+                        // (Tránh trường hợp trạm đã kết nối lại trong lúc chờ)
+                        if (card && card.state.status === 'Disconnected') {
+                            console.log(`[Dashboard] Auto-refresh: Wiping data for ${data.id} to clean state.`);
+                            
+                            // Tạo một state "trắng" hoàn toàn
+                            const cleanState = {
+                                status: 'Unavailable', // Giữ trạng thái Disconnected (hoặc 'Unavailable' nếu muốn màu xám)
+                                vendor: 'N/A',
+                                model: 'N/A',
+                                transactionId: null,
+                                chargeSpeed: null,      // Xóa chế độ sạc nhanh/chậm
+                                energy: 0,
+                                soc: 0,
+                                electricalParams: {     // Về 0 hết
+                                    v_avg: 0, vab: 0, vbc: 0, vca: 0,
+                                    i_sum: 0, ia: 0, ib: 0, ic: 0,
+                                    p_total: 0, q_total: 0, pf: 0,
+                                    Energy_kWh: 0
+                                }
+                            };
+
+                            // Gọi updateAll để áp dụng state mới (Vendor, Model sẽ về N/A)
+                            card.updateAll(cleanState);
+                            
+                            // Ép giao diện hiển thị các thông số điện về 0 ngay lập tức
+                            card.renderElectricalParameters(cleanState.electricalParams);
+                            card.updateEnergy(0);
+                            
+                            // (Tùy chọn) Nếu bạn muốn reset cả các pha Load về mặc định (chỉ Load 1 active)
+                            if (card.activePhases) {
+                                card.activePhases = [true, false, false];
+                                card.dom.loadRects.forEach((rect, index) => {
+                                    if (index === 0) rect.classList.add('active');
+                                    else rect.classList.remove('active');
+                                    rect.style.cursor = 'pointer';
+                                    rect.style.opacity = '1';
+                                });
+                                if (card.dom.autoModeBadge) card.dom.autoModeBadge.style.display = 'none';
+                                card.autoLoadMode = false;
+                            }
+                        }
+                    }, 5000);
+                }
+                
+                if (type === 'status') {
+                    card.updateStatus(data.status);
+                    if (data.electricalParams) {
+                        if (data.electricalParams) {
+                            card.renderElectricalParameters(data.electricalParams);
+                        }
+                }
+                }
+                
+                if (type === 'transactionStart') {
+                    card.updateTransaction(data.transactionId);
+                    updateRealTimeCharts(data.id);
+                }
+                
+                if (type === 'transactionStop') {
+                    card.updateTransaction(null);
+                }
+                
                 if (type === 'meterValue') {
-                    card.updateEnergy(data.value);
+                    if (data.value !== undefined) card.updateEnergy(data.value);
+                    if (data.soc !== undefined) card.updateSoC(data.soc);
+                    
+                    // Update thông số điện 
                     if (data.electricalParams) {
                         card.renderElectricalParameters(data.electricalParams);
                     }
+
+                    // Log OCPP chuẩn
+                    if (data.ocppStandardJson) {
+                        // 1. In ra Console (F12) để debug
+                        console.log(`[OCPP 1.6] MeterValues from ${data.id}:`, data.ocppStandardJson);
+
+                        // 2. Thêm dòng này để đẩy log vào bảng System Log trên UI
+                        addLogRow({
+                            direction: 'request',     
+                            chargePointId: data.id,
+                            message: data.ocppStandardJson 
+                        });
+                    }
                 }
-                if (type === 'heartbeat') card.triggerHeartbeat();
-                if (type === 'speedUpdate') card.setActivePhasesBySpeed(data.speed);
+                
+                if (type === 'heartbeat') {
+                    card.triggerHeartbeat();
+                }
+                
+                if (type === 'speedUpdate') {
+                    card.setActivePhasesBySpeed(data.speed);
+                }
 
             } catch (e) {
-                console.error("Error processing WebSocket message:", e);
+                console.error("[Dashboard] Error processing message:", e);
             }
         };
 
         ws.onclose = () => {
-            console.log("Dashboard disconnected. Reconnecting...");
+            console.log('[Dashboard] Disconnected. Reconnecting in 3s...');
+            const statusBadge = document.getElementById('connection-status');
+            if (statusBadge) {
+                statusBadge.textContent = 'Disconnected';
+                statusBadge.className = 'badge bg-danger';
+            }
+            // Set all offline
             chargePointCards.forEach(card => card.updateConnectionStatus(false));
             setTimeout(connectDashboard, 3000);
         };
         
         ws.onerror = (err) => {
-            console.error("WebSocket error:", err);
+            console.error('[Dashboard] WebSocket error:', err);
             ws.close();
-        }
+        };
     }
     
     connectDashboard();

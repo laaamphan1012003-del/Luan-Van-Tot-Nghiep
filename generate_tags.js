@@ -53,7 +53,7 @@ function mapDataType(nodeType) {
 async function main() {
     let connection;
     try {
-        console.log("🔄 Đang kết nối Database để lấy danh sách trạm...");
+        console.log("Đang kết nối Database để lấy danh sách trạm...");
         
         // Tạo kết nối DB
         connection = await mysql.createConnection(DB_CONFIG);
@@ -63,7 +63,7 @@ async function main() {
         const [rows] = await connection.execute('SELECT id FROM charge_points');
         const STATION_LIST = rows.map(row => row.id);
 
-        console.log(`✅ Tìm thấy ${STATION_LIST.length} trạm sạc:`, STATION_LIST);
+        console.log(`Tìm thấy ${STATION_LIST.length} trạm sạc:`, STATION_LIST);
 
         if (STATION_LIST.length === 0) {
             console.warn("⚠️ Không có trạm sạc nào trong database!");
@@ -99,10 +99,10 @@ async function main() {
 
         XLSX.writeFile(workbook, "WinCC_Tags_Auto.xlsx");
 
-        console.log("🎉 Xong! File 'WinCC_Tags_Auto.xlsx' đã được cập nhật theo Database.");
+        console.log("File 'WinCC_Tags_Auto.xlsx' đã được cập nhật theo Database.");
 
     } catch (error) {
-        console.error("❌ Lỗi:", error.message);
+        console.error("Error:", error.message);
     } finally {
         if (connection) await connection.end(); // Đóng kết nối DB
     }
