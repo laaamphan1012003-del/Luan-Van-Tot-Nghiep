@@ -1,0 +1,175 @@
+name: Build Android APK Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on tags like v1.0.0, v2.1.3, etc.
+
+permissions:
+  contents: write  # Required for creating releases and uploading assets
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check Rust cache
+        run: |
+          echo "Cargo registry size: $(du -sh ~/.cargo 2>/dev/null || echo '0')"
+          echo "Target cache size: $(du -sh mobile-app/target 2>/dev/null || echo '0')"
+          echo "Cache will persist on self-hosted runner between builds"
+      
+      - name: Check Gradle cache
+        run: |
+          echo "Gradle cache size: $(du -sh ~/.gradle 2>/dev/null || echo '0')"
+          echo "Cache will persist on self-hosted runner between builds"
+      
+      - name: Add Rust Android targets
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi
+      
+      - name: Install dependencies
+        run: |
+          cd mobile-app
+          npm install
+      
+      - name: Install Android SDK components
+        run: |
+          # SDK manager is already available at $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
+          if [ ! -d "$ANDROID_HOME/platforms/android-33" ]; then
+            echo "Installing Android SDK components..."
+            yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+              "platform-tools" \
+              "platforms;android-33" \
+              "build-tools;33.0.0" \
+              "ndk;25.2.9519653"
+          else
+            echo "SDK components already installed, skipping..."
+          fi
+      
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Initialize Android project
+        run: |
+          cd mobile-app
+          npm run tauri android init
+      
+      - name: Build Android APK
+        env:
+          CARGO_INCREMENTAL: 1
+        run: |
+          cd mobile-app
+          npm run tauri android build
+          
+          # Copy unsigned APK to working directory
+          cp gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk ocpp-mobile-client-unsigned.apk
+          
+          echo "✅ APK built successfully"
+          ls -lh ocpp-mobile-client-unsigned.apk
+      
+      - name: Decode and setup keystore
+        run: |
+          cd mobile-app
+          
+          # Decode base64 keystore from GitHub Secrets
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > ocpp-signing-key.keystore
+          
+          # Verify keystore was created
+          ls -lh ocpp-signing-key.keystore
+      
+      - name: Sign APK with apksigner (v2/v3)
+        run: |
+          cd mobile-app
+          
+          # Align APK
+          $ANDROID_HOME/build-tools/33.0.0/zipalign -v -p 4 \
+            ocpp-mobile-client-unsigned.apk \
+            ocpp-mobile-client-aligned.apk
+          
+          # Sign APK
+          $ANDROID_HOME/build-tools/33.0.0/apksigner sign \
+            --ks ocpp-signing-key.keystore \
+            --ks-key-alias ocpp-mobile \
+            --ks-pass pass:${{ secrets.ANDROID_KEYSTORE_PASSWORD }} \
+            --key-pass pass:${{ secrets.ANDROID_KEY_PASSWORD }} \
+            --out ocpp-mobile-client-signed.apk \
+            ocpp-mobile-client-aligned.apk
+          
+          # Verify signature
+          $ANDROID_HOME/build-tools/33.0.0/apksigner verify \
+            --verbose ocpp-mobile-client-signed.apk
+          
+          echo "✅ APK signed and verified successfully"
+          
+          # Clean up intermediate files
+          rm -f ocpp-mobile-client-unsigned.apk ocpp-mobile-client-aligned.apk ocpp-signing-key.keystore
+          
+          # Rename to versioned filename
+          mv ocpp-mobile-client-signed.apk ocpp-mobile-client-${{ steps.version.outputs.VERSION }}.apk
+          
+          echo "=== Final APK ==="
+          ls -lh ocpp-mobile-client-${{ steps.version.outputs.VERSION }}.apk
+      
+      - name: Calculate APK checksum
+        id: checksum
+        run: |
+          cd mobile-app
+          sha256sum ocpp-mobile-client-${{ steps.version.outputs.VERSION }}.apk > checksums.txt
+          echo "SHA256: $(cat checksums.txt)" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            mobile-app/ocpp-mobile-client-${{ steps.version.outputs.VERSION }}.apk
+            mobile-app/checksums.txt
+          body: |
+            ## OCPP Mobile Client ${{ steps.version.outputs.VERSION }}
+            
+            ### 📱 Android APK
+            
+            **Installation Instructions:**
+            1. Download the APK file below
+            2. Enable "Install from unknown sources" on your Android device
+            3. Transfer the APK to your device and install
+            4. Grant camera and network permissions when prompted
+            
+            **Features:**
+            - OCPP 1.6 charge point simulation
+            - QR code scanning for quick connection
+            - Real-time WebSocket communication
+            - Customer interface for charge point control
+            
+            **Requirements:**
+            - Android 7.0 (API level 24) or higher
+            - Camera permission for QR scanning
+            - Network permission for WebSocket connection
+            
+            **Note:** This APK is signed with a development certificate. You may see an "Unknown source" warning during installation (this is normal for non-Play Store apps).
+            
+            ### 📋 Checksums
+            See `checksums.txt` for SHA256 verification.
+            
+            ---
+            
+            **Full Changelog:** https://github.com/${{ github.repository }}/compare/${{ steps.version.outputs.VERSION }}...HEAD
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocpp-mobile-client-${{ steps.version.outputs.VERSION }}
+          path: |
+            mobile-app/ocpp-mobile-client-${{ steps.version.outputs.VERSION }}.apk
+            mobile-app/checksums.txt
+          retention-days: 90

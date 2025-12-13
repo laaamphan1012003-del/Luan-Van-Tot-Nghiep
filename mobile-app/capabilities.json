@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.ocpp.mobile.client",
+  "build": {
+    "features": []
+  },
+  "android": {
+    "minSdkVersion": 24,
+    "allowedHosts": ["*"],
+    "useCleartextTraffic": true,
+    "permissions": [
+      "android.permission.INTERNET",
+      "android.permission.CAMERA",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_WIFI_STATE"
+    ]
+  },
+  "ios": {
+    "minimumSystemVersion": "13.0",
+    "usageDescriptions": {
+      "NSCameraUsageDescription": "This app needs camera access to scan QR codes for charge point connections.",
+      "NSLocalNetworkUsageDescription": "This app needs network access to connect to OCPP charge points via WebSocket."
+    }
+  }
+}

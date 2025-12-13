@@ -1,0 +1,271 @@
+:root {
+    --bg-color: #f7f8fa;
+    --surface-color: #ffffff;
+    --border-color: #e0e6ec;
+    --text-primary: #1a253c;
+    --text-secondary: #6b778c;
+    --primary-color: #0052cc;
+    --danger-color: #de350b;
+    --status-available-bg: #e3fcef;
+    --status-available-text: #006644;
+    --status-unavailable-bg: #dfe1e6;
+    --status-unavailable-text: #42526e;
+    --status-charging-bg: #deebff;
+    --status-charging-text: #0747a6;
+    --status-faulted-bg: #ffebe6;
+    --status-faulted-text: #bf2600;
+}
+
+.hidden {
+    display: none !important;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: var(--bg-color);
+    margin: 0;
+    padding: 20px;
+    color: var(--text-primary);
+}
+
+.scada-container {
+    max-width: 1200px;
+    margin: 20px auto;
+    background: var(--surface-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    overflow: hidden;
+}
+
+/* View Management */
+.view { display: none; }
+.view.active { display: block; }
+
+/* Station List View */
+.list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+.list-header h2 { margin: 0; }
+.search-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-color);
+    padding: 8px 12px;
+    border-radius: 6px;
+    flex-grow: 1;
+    max-width: 400px;
+}
+.search-bar input {
+    border: none;
+    background: none;
+    outline: none;
+    width: 100%;
+    font-size: 1em;
+}
+.add-btn {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.list-main { padding: 10px; }
+.station-table { width: 100%; border-collapse: collapse; }
+.station-table th, .station-table td {
+    padding: 15px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+.station-table tbody tr { cursor: pointer; }
+.station-table tbody tr:hover { background-color: var(--bg-color); }
+.status-tag {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-weight: 500;
+    font-size: 0.9em;
+    display: inline-block;
+}
+.status-available { background-color: var(--status-available-bg); color: var(--status-available-text); }
+.status-charging { background-color: var(--status-charging-bg); color: var(--status-charging-text); }
+.status-faulted { background-color: var(--status-faulted-bg); color: var(--status-faulted-text); }
+.status-unavailable { background-color: var(--status-unavailable-bg); color: var(--status-unavailable-text); }
+
+/* Station Detail View */
+.detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+.back-btn, .action-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    padding: 8px 15px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+}
+.action-btn.edit-btn { color: var(--primary-color); border-color: var(--primary-color); }
+.action-btn.delete-btn { color: var(--danger-color); border-color: var(--danger-color); }
+
+.detail-main { padding: 20px; }
+.station-info-card {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    background: var(--bg-color);
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+.station-icon { font-size: 2.5em; color: var(--text-secondary); }
+.station-details h2 { margin: 0 0 5px 0; }
+.station-details p { margin: 0; color: var(--text-secondary); }
+.station-info-card .status-tag { margin-left: auto; }
+
+.connector-card, .qr-code-card {
+    background: var(--bg-color);
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+.qr-code-card {
+    text-align: center;
+}
+#qrcode {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 15px;
+}
+#qrcode img {
+    background: white;
+    padding: 10px;
+    border-radius: 8px;
+}
+
+/* Modal Styles */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+.modal {
+    background: var(--surface-color);
+    padding: 25px;
+    border-radius: 8px;
+    width: 100%;
+    max-width: 500px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+}
+.modal-header h3 { margin: 0; font-size: 1.4em; }
+.close-btn { background: none; border: none; font-size: 1.8em; cursor: pointer; color: var(--text-secondary); }
+.modal-body .form-group { margin-bottom: 15px; }
+.modal-body .form-group label { display: block; margin-bottom: 8px; font-weight: 500; }
+.modal-body .form-group input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 10px;
+}
+.modal-btn {
+    padding: 10px 20px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    font-weight: 500;
+}
+.add-modal-btn {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+/* --- New Additions for Energy & Progress --- */
+.station-info-card-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+/* --- CSS Mới cho Progress Bar & Energy --- */
+
+/* Class ẩn phần tử */
+.hidden {
+    display: none !important;
+}
+
+/* Container bao ngoài */
+.station-info-card-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+/* Khung thanh loading */
+.charging-progress {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 10px;
+    border: 1px solid #e9ecef;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.progress-info {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 0.95em;
+}
+
+/* Nền xám của thanh loading */
+.progress-bar-bg {
+    width: 100%;
+    height: 12px;
+    background-color: #e0e0e0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+/* Phần màu xanh chạy bên trong */
+.progress-bar-fill {
+    height: 100%;
+    background-color: #28a745; /* Màu xanh lá */
+    width: 0%; /* Giá trị này sẽ được JS cập nhật */
+    transition: width 0.5s ease-in-out; /* Hiệu ứng mượt khi thay đổi % */
+    
+    /* Hiệu ứng sọc chéo (tùy chọn) */
+    background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
+    background-size: 1rem 1rem;
+}

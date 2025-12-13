@@ -1,0 +1,35 @@
+# Rust
+/target
+
+# Tauri
+
+# Mobile builds
+*.apk
+*.aab
+*.ipa
+*.dSYM.zip
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+*.tmp
+*.bak
+
+# Signing keys and signed APKs
+*.keystore
+*.keystore.base64
+*-signed.apk
+*.idsig

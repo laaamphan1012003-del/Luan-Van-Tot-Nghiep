@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OCPP Mobile Client",
+  "version": "0.1.30",
+  "identifier": "com.ocpp.mobile.client",
+  "build": {
+    "frontendDist": "public"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "OCPP CSMS",
+    "copyright": "Copyright © 2025",
+    "category": "Utility",
+    "shortDescription": "OCPP 1.6 Charge Point Mobile Simulator",
+    "longDescription": "Mobile application for simulating OCPP 1.6 charge point connections with QR code scanning support.",
+    "iOS": {
+      "minimumSystemVersion": "13.0"
+    },
+    "android": {
+      "minSdkVersion": 24
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MicroOcpp Client Simulator",
+        "width": 375,
+        "height": 812,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: https:; media-src 'self' data: mediastream:; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

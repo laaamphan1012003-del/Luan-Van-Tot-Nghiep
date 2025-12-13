@@ -1,0 +1,55 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ocpp-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-L@m0981985353}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ocpp_csms}
+      MYSQL_USER: ${MYSQL_USER:-ocpp_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ocpp_pass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - ocpp-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-L@m0981985353}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: ocpp-csms-app
+    restart: unless-stopped
+    ports:
+      - "9000:9000"  # HTTP/WebSocket
+      - "4840:4840"  # OPC UA
+    environment:
+      DB_HOST: mysql
+      DB_USER: ${MYSQL_USER:-ocpp_user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-ocpp_pass}
+      DB_NAME: ${MYSQL_DATABASE:-ocpp_csms}
+      DB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-L@m0981985353}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - ocpp-network
+    volumes:
+      - ./public:/app/public
+      - ./server.js:/app/server.js
+      - ./database.js:/app/database.js
+      - ./OCPP_handler.py:/app/OCPP_handler.py
+      - ./OCPP_message.py:/app/OCPP_message.py
+      - ./generate_tags.js:/app/generate_tags.js
+
+networks:
+  ocpp-network:
+    driver: bridge
+
+volumes:
+  mysql_data:

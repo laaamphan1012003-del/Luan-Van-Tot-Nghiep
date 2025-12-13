@@ -1,0 +1,20 @@
+{
+  "name": "ocpp-mobile-client",
+  "version": "0.1.16",
+  "description": "OCPP 1.6 Mobile Client with Tauri v2",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "keywords": [
+    "ocpp",
+    "tauri",
+    "mobile",
+    "charge-point",
+    "ev-charging"
+  ],
+  "author": "OCPP CSMS",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

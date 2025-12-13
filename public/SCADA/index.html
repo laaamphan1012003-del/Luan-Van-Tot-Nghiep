@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCADA - Stations Management</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="/SCADA/style.css">
+</head>
+<body>
+    <div class="scada-container">
+        <!-- View 1: Station List -->
+        <div id="station-list-view" class="view active">
+            <header class="list-header">
+                <div class="search-bar">
+                    <i class="fa-solid fa-search"></i>
+                    <input type="text" id="search-input" placeholder="Search by Id, Status, or Location...">
+                </div>
+                <h2>Stations</h2>
+                <button id="add-station-btn" class="add-btn">ADD</button>
+            </header>
+            <main class="list-main">
+                <table class="station-table">
+                    <thead>
+                        <tr>
+                            <th>Id</th>
+                            <th>Status</th>
+                            <th>Location</th>
+                            <th>Last activity</th>
+                        </tr>
+                    </thead>
+                    <tbody id="station-table-body">
+                    </tbody>
+                </table>
+            </main>
+        </div>
+
+        <!-- View 2: Station Detail -->
+        <div id="station-detail-view" class="view">
+            <header class="detail-header">
+                <button id="back-to-list-btn" class="back-btn"><i class="fa-solid fa-arrow-left"></i> Back to list</button>
+                <div>
+                    <button id="edit-station-btn" class="action-btn edit-btn">EDIT</button>
+                    <button id="delete-station-btn" class="action-btn delete-btn">DELETE</button>
+                </div>
+            </header>
+            <main class="detail-main">
+                <!-- Container thông tin trạm -->
+                <div class="station-info-card-container">
+                    <div class="station-info-card">
+                        <div class="station-icon"><i class="fa-solid fa-charging-station"></i></div>
+                        <div class="station-details">
+                            <h2 id="detail-station-id">ID: --</h2>
+                            <p id="detail-station-meta">Vendor / Model</p>
+            
+                            <p id="detail-energy-container" class="hidden" style="margin-top: 5px; color: #0052cc; font-weight: 600;">
+                                Energy: <span id="detail-energy-value">0</span> kWh
+                            </p>
+                        </div>
+                        <div id="detail-status-tag" class="status-tag"></div>
+                    </div>
+
+                    <div id="charging-progress-container" class="charging-progress hidden">
+                        <div class="progress-info">
+                             <span style="font-weight: bold; color: #333;">Charging...</span>
+                             <span id="time-remain-text" style="color: #666;">--:-- remaining</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Connector Details Container -->
+                <div id="connector-details" class="connector-card">
+                    <!-- Connector status will be populated here -->
+                </div>
+
+                <!-- QR Code Container with ID -->
+                <div id="qr-code-container" class="qr-code-card hidden">
+                    <div id="qrcode"></div>
+                    <p>Scan to start charging</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modal for Add/Edit Station -->
+    <div id="add-station-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Add New Station</h3>
+                <button class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="modal-station-id">Id</label>
+                    <input type="text" id="modal-station-id" placeholder="e.g., wallbox">
+                </div>
+                <div class="form-group">
+                    <label for="modal-station-location">Location</label>
+                    <input type="text" id="modal-station-location" placeholder="e.g., parking space 1">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn close-modal-btn">CLOSE</button>
+                <button class="modal-btn add-modal-btn">ADD</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
+    <script src="/SCADA/app.js"></script>
+</body>
+</html>

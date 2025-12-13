@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCPP CSMS Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- SIDEBAR BÊN TRÁI -->
+        <aside class="sidebar" id="admin-sidebar">
+            <div class="sidebar-header">
+                <h2><i class="fa-solid fa-bolt"></i> <span class="brand-text">CSMS Admin</span></h2>
+            </div>
+            <nav class="sidebar-nav">
+                <!-- Tab  -->
+                <a href="#" class="nav-link active" onclick="openTab('realtime-view', this)">
+                    <div class="icon-container"><i class="fa-solid fa-chart-line"></i></div>
+                    <span class="link-text">Real-time Status</span>
+                </a>
+                <a href="#" class="nav-link" onclick="openTab('database-view', this)">
+                    <div class="icon-container"><i class="fa-solid fa-database"></i></div>
+                    <span class="link-text">Charging History</span>
+                </a>
+                
+            </nav>
+        </aside>
+
+        <!-- Main screen -->
+        <main class="main-content-area">
+            <header class="content-header">
+                <div class="header-left">
+                    <button id="sidebar-toggle" class="toggle-btn" title="Toggle Sidebar" aria-label="Toggle Sidebar Menu">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <h1>Overview</h1>
+                </div>
+                <div class="user-profile">
+                    <span class="status-indicator online"></span>
+                    <i class="fa-solid fa-circle-user"></i> <span class="user-name">Admin System</span>
+                </div>
+            </header>
+
+            <!-- View 1: Realtime -->
+            <div id="realtime-view" class="tab-content active">
+                <section class="global-log-section">
+                    <div class="log-header">
+                        <h2><i class="fa-solid fa-file-waveform"></i> Global OCPP Log</h2>
+                    </div>
+                    <div class="log-table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Direction</th>
+                                    <th>Charge Point ID</th>
+                                    <th>Action</th>
+                                    <th>Payload</th>
+                                </tr>
+                            </thead>
+                            <tbody id="global-log-body"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <div id="chargers-container"></div>
+            </div>
+
+            <!-- View 2: Database History -->
+            <div id="database-view" class="tab-content">
+                <section class="sql-section global-log-section">
+                    <div class="log-header">
+                        <h2><i class="fa-solid fa-list"></i> Transaction History</h2>
+                        
+                        <!-- Searching Landscape -->
+                        <div class="search-bar-container">
+                            <div class="search-input-group">
+                                <i class="fa-solid fa-hashtag"></i>
+                                <input type="text" id="search-tx-id" placeholder="Tx ID..." aria-label="Filter by Transaction ID">
+                            </div>
+                            <div class="search-input-group">
+                                <i class="fa-solid fa-charging-station"></i>
+                                <input type="text" id="search-cp-id" placeholder="Charge Point..." aria-label="Filter by Charge Point ID">
+                            </div>
+                            <div class="search-input-group">
+                                <i class="fa-solid fa-calendar"></i>
+                                <input type="date" id="search-date" aria-label="Filter by Date">
+                            </div>
+                            <button onclick="loadSqlData()" class="refresh-btn"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
+                        </div>
+                    </div>
+                    <div class="log-table-container">
+                        <table class="sql-table">
+                            <thead>
+                                <tr>
+                                    <th>Tx ID</th>
+                                    <th>Charge Point</th>
+                                    <th>ID Tag</th>
+                                    <th>Start Time</th>
+                                    <th>End Time</th>
+                                    <th>Energy (Wh)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sql-table-body">
+                                <tr><td colspan="6" class="table-message info">Click Refresh to load data</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Chart landscape -->
+                <section class="charts-section" style="margin-top: 24px;">
+                    <div class="log-header" style="border-bottom: none; padding-bottom: 0;">
+                        <h2><i class="fa-solid fa-chart-pie"></i> Statistics</h2>
+                        
+                        <div class="chart-controls-wrapper" style="display: flex; align-items: center; gap: 15px;">
+                            <!-- LIST BOX CHỌN CHART -->
+                            <div class="view-selector">
+                                <i class="fa-solid fa-eye" style="color: #6b778c; margin-right: 5px;"></i>
+                                <select id="chart-view-select" class="chart-select" aria-label="Select Chart View">
+                                    <option value="all">All Charts</option>
+                                    <option value="usageCountChart">Usage Count</option>
+                                    <option value="energyChart">Total Energy</option>
+                                    <option value="usageTimeChart">Usage Frequency</option>
+                                </select>
+                            </div>
+
+                            <div class="chart-filters" style="display: flex; gap: 8px;">
+                                <button class="filter-btn active" onclick="updateCharts('1d')">1 Day</button>
+                                <button class="filter-btn" onclick="updateCharts('1w')">1 Week</button>
+                                <button class="filter-btn" onclick="updateCharts('1m')">1 Month</button>
+                                <button class="filter-btn" onclick="updateCharts('3m')">3 Months</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="charts-grid">
+                        <!-- Usage Count Chart -->
+                        <div class="chart-card" id="card-usageCountChart">
+                            <h4 class="chart-title">Usage Count per Station</h4>
+                            <div class="chart-canvas-wrapper">
+                                <canvas id="usageCountChart"></canvas>
+                            </div>
+                            <!-- Session Summaction-->
+                            <div id="total-sessions-display" style="text-align: center; margin-top: 10px; font-weight: bold; color: var(--primary-color);"></div>
+                        </div>
+
+                        <!-- Total Energy Chart -->
+                        <div class="chart-card" id="card-energyChart">
+                            <h4 class="chart-title">Total Energy per Station</h4>
+                            <div class="chart-canvas-wrapper">
+                                <canvas id="energyChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Usage Frequency Over Time -->
+                        <div class="chart-card full-width" id="card-usageTimeChart">
+                            <h4 class="chart-title">Usage Frequency Over Time</h4>
+                            <div class="chart-canvas-wrapper large">
+                                <canvas id="usageTimeChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+        </main>
+    </div>
+    <script src="/app.js"></script>
+</body>
+</html>

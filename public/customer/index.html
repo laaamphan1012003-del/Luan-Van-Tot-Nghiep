@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MicroOcpp Client Simulator</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="/customer/style.css">
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3><i class="fa-solid fa-bolt"></i> MicroOcpp</h3>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-link active" data-view="status-view"><i class="fa-solid fa-chart-line"></i> Status</a>
+                <a href="#" class="nav-link" data-view="connection-view"><i class="fa-solid fa-network-wired"></i> OCPP 1.6 Connection</a>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <!-- View 1: Status -->
+            <div id="status-view" class="view active">
+                <header class="view-header">
+                    <h2>Charge Point Simulator</h2>
+                </header>
+                <div id="connectors-container">
+                    <div class="connector-placeholder">
+                        Please connect to a Charge Point using the 'OCPP 1.6 Connection' tab.
+                    </div>
+                </div>
+            </div>
+
+            <!-- View 2: Connection -->
+            <div id="connection-view" class="view">
+                <header class="view-header">
+                    <h2>OCPP 1.6 Websocket</h2>
+                </header>
+                <div class="connection-form">
+                    <div class="connection-status-banner"></div>
+                    
+                    <!-- QR Scanner Section -->
+                    <div class="qr-scanner-section">
+                        <h3 style="margin-bottom: 15px;">
+                            <i class="fa-solid fa-qrcode"></i> Scan QR Code
+                        </h3>
+                        <div id="qr-reader" style="width: 100%; max-width: 500px; margin: 0 auto;"></div>
+                        <button id="toggle-scanner-btn" class="scanner-toggle-btn">
+                            <i class="fa-solid fa-camera"></i> Start Scanner
+                        </button>
+                    </div>
+
+                    <div class="divider">
+                        <span>OR</span>
+                    </div>
+
+                    <!-- Manual Entry Section -->
+                    <div class="manual-entry-section">
+                        <h3 style="margin-bottom: 15px;">
+                            <i class="fa-solid fa-keyboard"></i> Manual Entry
+                        </h3>
+                        <div class="form-group">
+                            <label for="backend-url-input">Backend URL</label>
+                            <input type="text" id="backend-url-input" value="ws://localhost:9000">
+                        </div>
+                        <div class="form-group">
+                            <label for="chargebox-id-input">Chargebox ID</label>
+                            <input type="text" id="chargebox-id-input" placeholder="Enter ID from SCADA list">
+                        </div>
+                    </div>
+
+                    <button id="connect-btn" class="connect-btn">
+                        <i class="fa-solid fa-plug"></i> Connect Websocket
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="/customer/app.js"></script>
+</body>
+</html>
