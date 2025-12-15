@@ -56,12 +56,17 @@ docker-compose logs -f app
 - Customer Portal: http://localhost:9000/customer
 - OPC UA Server: opc.tcp://localhost:4840
 
-6. **Dừng ứng dụng**
+6. **Kill PID**
+- Mở CMD bằng quyền admin
+- Dán câu lệnh này để xem PORT đnag bị chiếm dungdụng bởi PID nào: netstat -ano | findstr :3000
+- Kill PID: taskkill /PID {PID} /F
+
+7. **Dừng ứng dụng**
 ```bash
 docker-compose down
 ```
 
-7. **Xóa dữ liệu và khởi động lại từ đầu**
+8. **Xóa dữ liệu và khởi động lại từ đầu**
 ```bash
 docker-compose down -v
 docker-compose up -d
