@@ -1,21 +1,18 @@
-// File: generate_tags.js
 const XLSX = require('xlsx');
-const mysql = require('mysql2/promise'); 
+const mysql = require('mysql2/promise');
+const path = require('path');
+const fs = require('fs');
 
-// 1. CẤU HÌNH DATABASE 
+// Cấu hình Database kết nối nội bộ Docker
 const DB_CONFIG = {
-    host: 'localhost',
-    user: 'root',           // Tên đăng nhập MySQL
-    password: 'L@m0981985353',   // Mật khẩu MySQL
-    database: 'ocpp_csms'   // Tên database dự án của bạn
+    host: process.env.DB_HOST || 'mysql_db', 
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || 'root', 
+    database: process.env.DB_NAME || 'ocpp_csms'
 };
 
-// Cấu hình WinCC
 const WINCC_CONNECTION_NAME = "Connection_1";
-const NAMESPACE_INDEX = 1;
-const OPC_UA_SERVER_STRING = "opc.tcp://192.168.1.8:4840/UA/OcppCsmsServer"
 
-// 2. DANH SÁCH BIẾN 
 const variableDefs = [
     { name: "Status", type: "String" },
     { name: "ChargeSpeed", type: "String" },
@@ -53,59 +50,45 @@ function mapDataType(nodeType) {
 async function main() {
     let connection;
     try {
-        console.log("Đang kết nối Database để lấy danh sách trạm...");
-        
-        // Tạo kết nối DB
+        console.log("--> Bat dau tao file Excel Tags...");
         connection = await mysql.createConnection(DB_CONFIG);
-        
-        // Truy vấn lấy tất cả ID trạm sạc từ bảng charge_points
         const [rows] = await connection.execute('SELECT id FROM charge_points');
+        
         const STATION_LIST = rows.map(row => row.id);
-
-        console.log(`Tìm thấy ${STATION_LIST.length} trạm sạc:`, STATION_LIST);
-
-        if (STATION_LIST.length === 0) {
-            console.warn("⚠️ Không có trạm sạc nào trong database!");
-            return;
-        }
-
-        // --- BẮT ĐẦU TẠO EXCEL ---
+        
         const headers = ["Name", "Path", "Connection", "Access Method", "Address", "DataType"];
         const dataRows = [headers];
 
         STATION_LIST.forEach(stationId => {
             variableDefs.forEach(def => {
-                const tagName = `${stationId}_${def.name}`;
-                const address = `ns=${OPC_UA_SERVER_STRING};s=${stationId}_${def.name}`;
-                const winccType = mapDataType(def.type);
-
                 dataRows.push([
-                    tagName,
+                    `${stationId}_${def.name}`,
                     "", 
                     WINCC_CONNECTION_NAME,
                     "<Absolute Access>",
-                    address,
-                    winccType
+                    `ns=1;s=${stationId}_${def.name}`, 
+                    mapDataType(def.type)
                 ]);
             });
         });
 
         const workbook = XLSX.utils.book_new();
         const worksheet = XLSX.utils.aoa_to_sheet(dataRows);
-        
-        // Đặt tên sheet trùng với bảng tag bạn muốn paste vào 
         XLSX.utils.book_append_sheet(workbook, worksheet, "Hmi Tags"); 
 
-        XLSX.writeFile(workbook, "WinCC_Tags_Auto.xlsx");
+        // Lưu vào thư mục public
+        const outputDir = path.join(__dirname, 'public');
+        if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
 
-        console.log("File 'WinCC_Tags_Auto.xlsx' đã được cập nhật theo Database.");
+        const outputPath = path.join(outputDir, 'WinCC_Tags_Auto.xlsx');
+        XLSX.writeFile(workbook, outputPath);
+        console.log(`--> THANH CONG! File da luu tai: ${outputPath}`);
 
     } catch (error) {
-        console.error("Error:", error.message);
+        console.error("--> LOI:", error.message);
     } finally {
-        if (connection) await connection.end(); 
+        if (connection) await connection.end();
     }
 }
 
-// Chạy hàm main
 main();

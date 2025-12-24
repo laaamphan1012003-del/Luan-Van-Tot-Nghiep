@@ -58,7 +58,7 @@ docker-compose logs -f app
 
 6. **Kill PID**
 - Mở CMD bằng quyền admin
-- Dán câu lệnh này để xem PORT đnag bị chiếm dungdụng bởi PID nào: netstat -ano | findstr :3000
+- Dán câu lệnh này để xem PORT đnag bị chiếm dungdụng bởi PID nào: netstat -ano | findstr :4840
 - Kill PID: taskkill /PID {PID} /F
 
 7. **Dừng ứng dụng**
