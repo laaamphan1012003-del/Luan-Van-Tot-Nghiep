@@ -957,6 +957,21 @@ wss.on('connection', async (ws, req) => {
                             updateOpcuaVariables(chargePointId, { Status: chargePointState.status });
                         }
                     } 
+                    else if (action === 'Authorize') {
+                        const idTag = payload.idTag;
+                        console.log(`[Master] Nhận yêu cầu Authorize từ ${chargePointId} với thẻ: ${idTag}`);
+
+                        const response = [3, parsedMessage[1], {
+                            idTagInfo: {
+                                status: "Accepted",
+                                expiryDate: new Date(Date.now() + 3600 * 1000 * 24 * 365).toISOString(), 
+                                parentIdTag: null
+                            }
+                        }];
+                        
+                        logTraffic(chargePointId, 'outgoing', response);
+                        ws.send(JSON.stringify(response));
+                    }
                     else if (action === 'StartTransaction') {
                         console.log(`[Master] Nhận StartTransaction từ ${chargePointId}`);
                         

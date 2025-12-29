@@ -1,3 +1,7 @@
+if (localStorage.getItem('isLoggedIn') !== 'true') {
+    window.location.href = 'auth/index.html';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- VIEW MANAGEMENT ---
     const statusBackBtn = document.getElementById('status-back-btn');
@@ -15,6 +19,147 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     let isChargingSessionActive = false;
+
+    // --- LOGIC SIDEBAR & USER ---
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    const toggleBtn = document.getElementById('sidebar-toggle');
+    
+    // Hàm đóng menu
+    const closeSidebar = () => {
+        if (sidebar) sidebar.classList.remove('show');
+        if (sidebarOverlay) sidebarOverlay.classList.remove('active');
+    };
+
+    // Hàm mở menu
+    const openSidebar = () => {
+        if (sidebar) sidebar.classList.add('show');
+        if (sidebarOverlay) sidebarOverlay.classList.add('active');
+    };
+
+    // Sự kiện nút Toggle (3 gạch)
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (sidebar.classList.contains('show')) {
+                closeSidebar();
+            } else {
+                openSidebar();
+            }
+        });
+    }
+
+    // Đóng sidebar khi click ra ngoài
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', closeSidebar);
+    }
+
+    // Tab (Home / Profile)
+    window.switchMainTab = (tabName) => {
+        const btnHome = document.getElementById('nav-btn-home');
+        const btnProfile = document.getElementById('nav-btn-profile');
+        
+        if (btnHome) btnHome.classList.remove('active');
+        if (btnProfile) btnProfile.classList.remove('active');
+
+        if (tabName === 'home' && btnHome) btnHome.classList.add('active');
+        if (tabName === 'profile' && btnProfile) btnProfile.classList.add('active');
+
+        // Update nội dung tab active
+        document.querySelectorAll('.main-tab').forEach(tab => tab.classList.remove('active'));
+        const targetTab = document.getElementById(`tab-${tabName}`);
+        if (targetTab) targetTab.classList.add('active');
+
+        const headerTitle = document.getElementById('header-title');
+        if (headerTitle) headerTitle.textContent = tabName === 'home' ? 'Charging' : 'Users';
+
+        // Đóng menu nếu đang ở mobile 
+        if (window.innerWidth <= 768) {
+            setTimeout(() => {
+                closeSidebar();
+            }, 50); 
+        }
+    };
+
+    // 2. Gán sự kiện trực tiếp 
+    const navBtnHome = document.getElementById('nav-btn-home');
+    const navBtnProfile = document.getElementById('nav-btn-profile');
+
+    if (navBtnHome) {
+        navBtnHome.addEventListener('click', (e) => {
+            e.preventDefault(); 
+            switchMainTab('home');
+        });
+    }
+
+    if (navBtnProfile) {
+        navBtnProfile.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchMainTab('profile');
+        });
+    }
+    // Load User Info
+    const loadUserInfo = () => {
+        const userJson = localStorage.getItem('currentUser');
+        if (userJson) {
+            const user = JSON.parse(userJson);
+            const fullName = `${user.lastname || ''} ${user.firstname || ''}`.trim();
+            const idTag = user.idTag || '--';
+            
+            // Update Sidebar
+            document.getElementById('display-name').textContent = fullName || 'User';
+            document.getElementById('display-email').textContent = user.email || '';
+
+            // Update ID Tag
+            const displayIdTag = document.getElementById('display-idtag');
+            if(displayIdTag) displayIdTag.textContent = idTag;
+            
+            // Update Profile Tab
+            document.getElementById('profile-name').textContent = fullName || 'User';
+            document.getElementById('profile-email-text').textContent = user.email || '';
+            document.getElementById('info-lastname').textContent = user.lastname || '--';
+            document.getElementById('info-firstname').textContent = user.firstname || '--';
+
+            // Update ID Tag in Profile
+            const infoIdTag = document.getElementById('info-idtag');
+            if(infoIdTag) infoIdTag.textContent = idTag;
+            
+            // Avatar Initials 
+            const initial = (user.firstname ? user.firstname[0] : 'U').toUpperCase();
+            const avatarEl = document.getElementById('avatar-initials');
+            if(avatarEl) avatarEl.textContent = initial;
+        }
+    };
+    loadUserInfo();
+
+    // --- LOGIC LOGOUT ---
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            if(confirm('Bạn có chắc chắn muốn đăng xuất?')) {
+                // 1. Kiểm tra nếu đang trong phiên sạc
+                if (typeof isChargingSessionActive !== 'undefined' && isChargingSessionActive) {
+                    alert("Vui lòng ngắt kết nối sạc trước khi đăng xuất!");
+                    return;
+                }
+
+                // 2. Xóa toàn bộ dữ liệu phiên
+                localStorage.removeItem('isLoggedIn');      
+                localStorage.removeItem('currentUser');     
+                localStorage.removeItem('savedBackendUrl');
+                localStorage.removeItem('savedChargeboxId');
+                localStorage.removeItem('ocpp_session_state');
+                
+                // Đóng socket nếu có
+                if (typeof websocket !== 'undefined' && websocket) {
+                    websocket.close();
+                }
+
+                // 3. CHUYỂN HƯỚNG VỀ TRANG LOGIN 
+                window.location.href = 'auth/index.html'; 
+            }
+        });
+    }
 
     // --- LOGIC BACK BUTTON (LOGOUT) ---
     if (statusBackBtn) {
@@ -938,7 +1083,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.showToast('Payment successful!');
                 
                 setTimeout(() => {
-                    this.startChargingProcess('MOBILE_APP_USER');
+                    this.startChargingProcess();
                     this.showChargingProgress();
                 }, 500);
             }, 5000);
@@ -990,7 +1135,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.showToast('Payment successful!');
                 
                 setTimeout(() => {
-                    this.startChargingProcess('MOBILE_APP_USER');
+                    this.startChargingProcess();
                     this.showChargingProgress();
                 }, 500);
             }, 2000);
@@ -1185,7 +1330,19 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        startChargingProcess(idTag) {
+        startChargingProcess(manualIdTag = null) {
+            let idTagToSend = manualIdTag;
+            
+            if (!idTagToSend) {
+                const userJson = localStorage.getItem('currentUser');
+                if (userJson) {
+                    const user = JSON.parse(userJson);
+                    idTagToSend = user.idTag; 
+                } else {
+                    idTagToSend = "GUEST_USER";
+                }
+            }
+
             this.sendRequest("DataTransfer", {
                 vendorId: "ChargingSpeed",
                 messageId: "SpeedSelection",
@@ -1198,10 +1355,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 data: this.targetPowerLevel.toString()
             });
 
-            this.sendRequest("Authorize", { idTag });
+            this.sendRequest("Authorize", { idTag: idTagToSend });
             this.sendRequest("StartTransaction", { 
                 connectorId: 1, 
-                idTag, 
+                idTag: idTagToSend, 
                 meterStart: 0, 
                 timestamp: new Date().toISOString()
             });
@@ -1459,7 +1616,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     // Start charging after toast
                     setTimeout(() => {
-                        chargePoint.startChargingProcess('MOBILE_APP_USER');
+                        chargePoint.startChargingProcess();
                         chargePoint.showChargingProgress();
                     }, 500);
                 }

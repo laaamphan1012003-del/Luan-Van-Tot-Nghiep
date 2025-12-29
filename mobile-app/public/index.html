@@ -2,126 +2,187 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#ffffff">
     <title>MicroOcpp Client</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
-    <div class="mobile-app">
-        <!-- Main Content -->
-        <main class="mobile-content">
+    <div class="app-layout">
+        <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="user-info">
+                    <h3 id="display-name">Guest</h3>
+                    <p id="display-email">guest@gmail.com</p>
+                    <div class="id-tag-badge"><i class="fa-solid fa-id-badge"></i> <span id="display-idtag">--</span></div>
+                    <span class="status-badge online"><i class="fa-solid fa-circle"></i> Online</span>
+                </div>
+            </div>
             
-            <!-- View 1: Connection (DEFAULT SCREEN) -->
-            <div id="connection-view" class="view active">
-                <div class="connection-form">
-                    <div class="connection-status-banner"></div>
-                    
-                    <!-- QR Scanner Section -->
-                    <div class="qr-scanner-section">
-                        <h3><i class="fa-solid fa-qrcode"></i> Scan QR Code</h3>
-                        <div id="qr-reader"></div>
-                        <button id="toggle-scanner-btn" class="scanner-toggle-btn" title="Toggle Camera Scanner" aria-label="Start or Stop QR Code Scanner">
-                            <i class="fa-solid fa-camera"></i> Start Scanner
-                        </button>
-                    </div>
-
-                    <div class="divider">
-                        <span>OR</span>
-                    </div>
-
-                    <!-- Manual Entry Section -->
-                    <div class="manual-entry-section">
-                        <h3><i class="fa-solid fa-keyboard"></i> Manual Entry</h3>
-                        <div class="form-group">
-                            <label for="backend-url-input">Backend URL</label>
-                            <input type="text" id="backend-url-input" value="ws://localhost:9000">
-                        </div>
-                        <div class="form-group">
-                            <label for="chargebox-id-input">Chargebox ID</label>
-                            <input type="text" id="chargebox-id-input" placeholder="Enter ID from SCADA list">
-                        </div>
-                    </div>
-
-                    <button id="connect-btn" class="connect-btn" title="Connect to Server" aria-label="Connect to Charge Point Server">
-                        <i class="fa-solid fa-plug"></i> Connect
-                    </button>
-                </div>
+            <nav class="sidebar-menu">
+                <button id="nav-btn-home" class="menu-item active" aria-label="Chuyển đến trang sạc điện">
+                    <i class="fa-solid fa-bolt"></i> Charging
+                </button>
+                <button id="nav-btn-profile" class="menu-item" aria-label="Chuyển đến trang tài khoản">
+                    <i class="fa-solid fa-user"></i> Users
+                </button>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <button id="logout-btn" class="logout-btn" aria-label="Đăng xuất khỏi tài khoản">
+                    <i class="fa-solid fa-right-from-bracket"></i> Log Out
+                </button>
             </div>
+        </aside>
 
-            <!-- View 2: Status -->
-            <div id="status-view" class="view">
-                <div class="status-header-bar">
-                    <button id="status-back-btn" class="header-back-btn" title="Back to Connection" aria-label="Back to Connection Screen">
-                        <i class="fa-solid fa-arrow-left"></i>
-                    </button>
-                    <h2>Charge Point</h2>
-                </div>
+        <main class="main-content" id="main-content">
+            <header class="top-header">
+                <button id="sidebar-toggle" class="icon-btn" aria-label="Mở/Đóng menu" title="Mở/Đóng menu">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h2 id="header-title">Charging</h2>
+            </header>
 
-                <div id="connectors-container">
-                    <!-- Nội dung thẻ sạc sẽ được JS chèn vào đây -->
-                </div>
-            </div>
+            <div class="content-body">
+                
+                <div id="tab-home" class="main-tab active">
+                    <div class="mobile-app">
+                        <div class="mobile-content">
+                            
+                            <div id="connection-view" class="view active">
+                                <div class="connection-form">
+                                    <div class="connection-status-banner"></div>
+                                    
+                                    <div class="qr-scanner-section">
+                                        <h3><i class="fa-solid fa-qrcode"></i> Scan QR Code</h3>
+                                        <div id="qr-reader"></div>
+                                        <button id="toggle-scanner-btn" class="scanner-toggle-btn" aria-label="Bật hoặc tắt máy quét QR">
+                                            <i class="fa-solid fa-camera"></i> Start Scanner
+                                        </button>
+                                    </div>
 
-            <!-- View 3: Stripe Payment -->
-            <div id="stripe-payment-view" class="view">
-                <div class="stripe-payment-container">
-                    <div class="stripe-payment-header">
-                        <button class="back-nav-btn" id="stripe-back-nav-btn" title="Back to Status" aria-label="Back to Status Screen">
-                            <i class="fa-solid fa-arrow-left"></i>
-                        </button>
-                        <h2><i class="fab fa-cc-stripe"></i> Card Payment</h2>
-                    </div>
-                    
-                    <div class="stripe-payment-content">
-                         <div class="stripe-card-display">
-                            <div class="stripe-card-chip"></div>
-                            <div class="stripe-card-number-display">•••• •••• •••• ••••</div>
-                            <div class="stripe-card-info-row">
-                                <span class="stripe-card-holder-display">CARD HOLDER</span>
-                                <span class="stripe-card-expiry-display">MM/YY</span>
+                                    <div class="divider"><span>OR</span></div>
+
+                                    <div class="manual-entry-section">
+                                        <h3><i class="fa-solid fa-keyboard"></i> Manual Entry</h3>
+                                        <div class="form-group">
+                                            <label for="backend-url-input">Backend URL</label>
+                                            <input type="text" id="backend-url-input" value="ws://localhost:9000" title="Đường dẫn Backend">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="chargebox-id-input">Chargebox ID</label>
+                                            <input type="text" id="chargebox-id-input" placeholder="Nhập ID trạm sạc" title="Mã trạm sạc">
+                                        </div>
+                                    </div>
+
+                                    <button id="connect-btn" class="connect-btn" aria-label="Kết nối tới trạm sạc">
+                                        <i class="fa-solid fa-plug"></i> Connect
+                                    </button>
+                                </div>
                             </div>
+
+                            <div id="status-view" class="view">
+                                <div class="status-header-bar">
+                                    <button id="status-back-btn" class="header-back-btn" aria-label="Quay lại màn hình kết nối" title="Quay lại">
+                                        <i class="fa-solid fa-arrow-left"></i>
+                                    </button>
+                                    <h2>Charging Station</h2>
+                                </div>
+                                <div id="connectors-container"></div>
+                            </div>
+                            
+                            <div id="stripe-payment-view" class="view">
+                                <div class="stripe-payment-container">
+                                    <div class="stripe-payment-header">
+                                        <button class="back-nav-btn" id="stripe-back-nav-btn" aria-label="Quay lại màn hình trạng thái" title="Quay lại">
+                                            <i class="fa-solid fa-arrow-left"></i>
+                                        </button>
+                                        <h2>Stripe Payment</h2>
+                                    </div>
+                                    
+                                    <div class="stripe-payment-content">
+                                         <div class="stripe-card-display">
+                                            <div class="stripe-card-chip"></div>
+                                            <div class="stripe-card-number-display">•••• •••• •••• ••••</div>
+                                            <div class="stripe-card-info-row">
+                                                <span class="stripe-card-holder-display">CARD HOLDER</span>
+                                                <span class="stripe-card-expiry-display">MM/YY</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="stripe-payment-form">
+                                            <div class="form-group">
+                                                <label for="stripe-card-number-input">Card Number</label>
+                                                <input type="text" id="stripe-card-number-input" placeholder="4242 4242 4242 4242" maxlength="19" title="Nhập số thẻ tín dụng">
+                                            </div>
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="stripe-expiry-input">Expired Date</label>
+                                                    <input type="text" id="stripe-expiry-input" placeholder="MM/YY" maxlength="5" title="Tháng/Năm hết hạn">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="stripe-cvc-input">CVC</label>
+                                                    <input type="text" id="stripe-cvc-input" placeholder="123" maxlength="3" title="Mã bảo mật CVC">
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="stripe-name-input">Cardholder Name</label>
+                                                <input type="text" id="stripe-name-input" placeholder="NGUYEN VAN A" title="Tên in trên thẻ">
+                                            </div>
+                                            
+                                            <div class="stripe-payment-amount-display">
+                                                <span class="amount-label">Payment Amount</span>
+                                                <span class="amount-value" id="stripe-payment-amount-value">0 VND</span>
+                                            </div>
+                                            
+                                            <button class="action-btn stripe-payment-btn" id="stripe-payment-btn" aria-label="Thanh toán ngay">
+                                                <i class="fas fa-lock"></i> Pay Now
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div id="payment-view" class="view"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-profile" class="main-tab">
+                    <div class="profile-container">
+                        <div class="profile-header-card">
+                            <div class="profile-avatar">
+                                <span id="avatar-initials">G</span>
+                            </div>
+                            <h2 id="profile-name">Guest User</h2>
+                            <p id="profile-email-text">guest@gmail.com</p>
                         </div>
                         
-                        <div class="stripe-payment-form">
-                            <div class="form-group">
-                                <label for="stripe-card-number-input">Card Number</label>
-                                <input type="text" id="stripe-card-number-input" placeholder="4242 4242 4242 4242" maxlength="19">
+                        <div class="profile-info-list">
+                            <div class="info-item">
+                                <span class="label">ID Tag </span>
+                                <span class="value" id="info-idtag" style="font-family: monospace; color: #0052cc;">--</span>
                             </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="stripe-expiry-input">Expiry Date</label>
-                                    <input type="text" id="stripe-expiry-input" placeholder="MM/YY" maxlength="5">
-                                </div>
-                                <div class="form-group">
-                                    <label for="stripe-cvc-input">CVC</label>
-                                    <input type="text" id="stripe-cvc-input" placeholder="123" maxlength="3">
-                                </div>
+                            <div class="info-item">
+                                <span class="label">Last Name</span>
+                                <span class="value" id="info-lastname">--</span>
                             </div>
-                            <div class="form-group">
-                                <label for="stripe-name-input">Cardholder Name</label>
-                                <input type="text" id="stripe-name-input" placeholder="JOHN DOE">
+                            <div class="info-item">
+                                <span class="label">First Name</span>
+                                <span class="value" id="info-firstname">--</span>
                             </div>
-                            
-                            <div class="stripe-payment-amount-display">
-                                <span class="amount-label">Amount to Pay</span>
-                                <span class="amount-value" id="stripe-payment-amount-value">0 VND</span>
+                            <div class="info-item">
+                                <span class="label">Status</span>
+                                <span class="value status-active">Active</span>
                             </div>
-                            
-                            <button class="action-btn stripe-payment-btn" id="stripe-payment-btn" title="Pay Now" aria-label="Process Payment Now">
-                                <i class="fas fa-lock"></i> Pay Now
-                            </button>
                         </div>
                     </div>
                 </div>
-            </div>
-            
-            <!-- View 4: Payment Placeholder -->
-            <div id="payment-view" class="view">
-                <div class="payment-container"></div>
+
             </div>
         </main>
     </div>
