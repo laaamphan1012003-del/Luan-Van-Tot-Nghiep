@@ -98,6 +98,112 @@ document.addEventListener('DOMContentLoaded', () => {
             switchMainTab('profile');
         });
     }
+
+    // Render Bảng Lịch Sử
+    const loadUserHistory = async () => {
+        const userJson = localStorage.getItem('currentUser');
+        if (!userJson) return;
+        const user = JSON.parse(userJson);
+        const currentIdTag = user.idTag;
+
+        try {
+            let backendUrl = localStorage.getItem('savedBackendUrl') || 'ws://61.14.234.50:9000';
+
+            if (backendUrl.startsWith('ws://')) {
+                backendUrl = backendUrl.replace('ws://', 'http://');
+            } else if (backendUrl.startsWith('wss://')) {
+                backendUrl = backendUrl.replace('wss://', 'https://');
+            }
+
+            const response = await fetch(`${backendUrl}/api/history?idTag=${currentIdTag}`);
+            
+            if (!response.ok) throw new Error(`Lỗi Server: ${response.status}`);
+            
+            const userHistory = await response.json();
+
+            // Tính tổng Energy
+            let totalEnergy = 0;
+            userHistory.forEach(h => totalEnergy += parseFloat(h.total_energy || 0));
+            
+            const totalEl = document.getElementById('total-user-energy');
+            if (totalEl) totalEl.textContent = `${(totalEnergy/1000).toFixed(2)} kWh`;
+
+            // Render bảng
+            renderHistoryTable(userHistory);
+
+        } catch (err) {
+            console.error("Không thể tải lịch sử:", err);
+            const tbody = document.getElementById('history-table-body');
+            if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red;">Không thể kết nối đến Server để lấy lịch sử.</td></tr>`;
+        }
+    };
+
+    // Hàm render bảng lịch sử
+    const renderHistoryTable = (data) => {
+        const tbody = document.getElementById('history-table-body');
+        const noDataMsg = document.getElementById('no-history-msg');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+
+        if (!data || data.length === 0) {
+            noDataMsg.style.display = 'block';
+            return;
+        } else {
+            noDataMsg.style.display = 'none';
+        }
+
+        data.forEach(item => {
+            const row = document.createElement('tr');
+            
+            const formatTimePretty = (isoStr) => {
+                if(!isoStr) return '<span style="color:#999">--</span>';
+                const d = new Date(isoStr);
+                const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const date = d.toLocaleDateString();
+                return `<div style="font-weight:600; color:#333">${time}</div>
+                        <div style="font-size:12px; color:#888; margin-top:2px">${date}</div>`;
+            };
+
+            row.innerHTML = `
+                <td style="font-family: monospace; font-weight: 600; color: #0052cc;">#${item.id}</td>
+                <td>
+                    <div style="display:flex; align-items:center; gap:8px">
+                        <i class="fa-solid fa-charging-station" style="color:#00875a"></i>
+                        <strong>${item.charge_point_id || item.location || 'Unknown'}</strong>
+                    </div>
+                </td>
+                <td>${formatTimePretty(item.start_time)}</td>
+                <td>${formatTimePretty(item.stop_time)}</td>
+                <td>
+                    <span style="background:#e3fcef; color:#006644; padding:4px 8px; border-radius:6px; font-weight:700;">
+                        ${(parseFloat(item.total_energy || 0)/1000).toFixed(2)} kWh
+                    </span>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    };
+
+    // Initial load user history
+    const searchInput = document.getElementById('history-search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', async (e) => {
+            const keyword = e.target.value.toLowerCase();
+            
+            const rows = document.querySelectorAll('#history-table-body tr');
+            
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                if(text.includes(keyword)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+    }
+
     // Load User Info
     const loadUserInfo = () => {
         const userJson = localStorage.getItem('currentUser');
@@ -128,6 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const initial = (user.firstname ? user.firstname[0] : 'U').toUpperCase();
             const avatarEl = document.getElementById('avatar-initials');
             if(avatarEl) avatarEl.textContent = initial;
+            loadUserHistory();
         }
     };
     loadUserInfo();
@@ -531,7 +638,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 isEvReady: this.isEvReady,
                 chargeSpeed: this.selectedChargeSpeed,
                 meterValue: this.meterValue,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                startTime: this.chargingStartTime
             };
             localStorage.setItem('ocpp_session_state', JSON.stringify(state));
         }
@@ -541,10 +649,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (savedJson) {
                 try {
                     const state = JSON.parse(savedJson);
-                    console.log("Loaded local state:", state);
                     
                     if (state.status === 'Charging' && state.transactionId) {
                         this.transactionId = state.transactionId;
+                        this.chargingStartTime = state.startTime || Date.now();
                         this.isPluggedIn = true;
                         this.isEvReady = true;
                         this.meterValue = state.meterValue || 0;
@@ -1366,6 +1474,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         stopChargingProcess() {
             this.isStopping = true;
+            const endTime = new Date().toISOString();
+            const finalEnergy = this.meterValue;
 
             this.sendRequest("StopTransaction", { 
                 transactionId: this.transactionId, 
@@ -1378,6 +1488,18 @@ document.addEventListener('DOMContentLoaded', () => {
             this.sendRequest("StatusNotification", { connectorId: 1, status: "Finishing", errorCode: "NoError" });
             this.updateStatusUI('Finishing');
             
+            let idTagUsed = "GUEST";
+            const userJson = localStorage.getItem('currentUser');
+            if (userJson) {
+                const user = JSON.parse(userJson);
+                idTagUsed = user.idTag;
+            }
+
+            // Reload user history after delay
+            setTimeout(() => {
+                if (typeof loadUserHistory === 'function') loadUserHistory();
+            }, 1500);
+
             this.clearLocalState();
 
             setTimeout(() => {

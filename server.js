@@ -416,12 +416,16 @@ const server = http.createServer(async (req, res) => {
     // 1. API: Take transaction history
     if (apiBase === 'api' && resource === 'history' && req.method === 'GET') {
         try {
-            const urlObj = new URL(req.url, `http://${req.headers.host}`);
+            const urlObj = new URL(req.url, `http://localhost`);
             const start = urlObj.searchParams.get('start');
             const end = urlObj.searchParams.get('end');
+            const idTag = urlObj.searchParams.get('idTag');
 
             let data;
-            if (start && end) {
+            if (idTag && idTag !== 'undefined' && idTag !== 'null') {
+                data = await db.getTransactionsByIdTag(idTag);
+            }
+            else if (start && end) {
                 const formatDate = (isoStr) => {
                     return isoStr.replace('T', ' ').substring(0, 19);
                 };

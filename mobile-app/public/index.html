@@ -179,6 +179,40 @@
                                 <span class="label">Status</span>
                                 <span class="value status-active">Active</span>
                             </div>
+                            <div class="history-container">
+                                <div class="history-header">
+                                    <h3><i class="fa-solid fa-clock-rotate-left"></i> Charging History</h3>
+                                    
+                                    <div class="history-summary-card">
+                                        <div class="summary-icon"><i class="fa-solid fa-bolt"></i></div>
+                                        <div class="summary-info">
+                                            <span class="label">Total Energy</span>
+                                            <span class="value" id="total-user-energy">0.00 kWh</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="search-box">
+                                        <i class="fa-solid fa-magnifying-glass"></i>
+                                        <input type="text" id="history-search-input" placeholder="Search Station or Tx ID...">
+                                    </div>
+                                </div>
+
+                                <div class="table-responsive">
+                                    <table class="history-table" id="history-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Tx ID</th>
+                                                <th>Station</th>
+                                                <th>Start Time</th>
+                                                <th>End Time</th>
+                                                <th>Energy (kWh)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="history-table-body">
+                                            </tbody>
+                                    </table>
+                                    <div id="no-history-msg" class="no-data" style="display: none;">No transaction history found.</div>
+                                </div>
                         </div>
                     </div>
                 </div>
