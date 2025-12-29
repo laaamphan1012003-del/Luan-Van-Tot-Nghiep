@@ -209,6 +209,28 @@ async function getTransactionsByDate(startDate, endDate) {
     }
 }
 
+async function getTransactionsByIdTag(idTag) {
+    if (!pool) return [];
+    try {
+        const sql = `
+            SELECT t.id, t.charge_point_id, t.id_tag, 
+                   t.start_time, t.stop_time, 
+                   t.meter_start, t.meter_stop,
+                   (t.meter_stop - t.meter_start) as total_energy,
+                   cp.location  
+            FROM transactions t
+            LEFT JOIN charge_points cp ON t.charge_point_id = cp.id
+            WHERE t.id_tag = ?
+            ORDER BY t.start_time DESC
+        `;
+        const [rows] = await pool.execute(sql, [idTag]);
+        return rows;
+    } catch (err) {
+        console.error('[Database] Lỗi getTransactionsByIdTag:', err.message);
+        return [];
+    }
+}
+
 module.exports = {
     initDb,
     getAllChargePoints,
@@ -220,5 +242,6 @@ module.exports = {
     startTransaction,
     stopTransaction,
     getRecentTransactions,
-    getTransactionsByDate
+    getTransactionsByDate,
+    getTransactionsByIdTag
 };
