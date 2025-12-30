@@ -129,7 +129,8 @@
                                     <option value="all">All Charts</option>
                                     <option value="usageCountChart">Usage Count</option>
                                     <option value="energyChart">Total Energy</option>
-                                    <option value="usageTimeChart">Usage Frequency</option>
+                                    <option value="usageTimeChart">Usage Frequency</option> 
+                                    <option value="userEnergyChart">Energy Consumed</option>
                                 </select>
                             </div>
 
@@ -158,6 +159,14 @@
                             <h4 class="chart-title">Total Energy per Station</h4>
                             <div class="chart-canvas-wrapper">
                                 <canvas id="energyChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Energy per User Chart -->
+                        <div class="chart-card full-width" id="card-userEnergyChart">
+                            <h4 class="chart-title">Energy Consumed per User (ID Tag)</h4>
+                            <div class="chart-canvas-wrapper">
+                                <canvas id="userEnergyChart"></canvas>
                             </div>
                         </div>
 

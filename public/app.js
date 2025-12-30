@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => {
             if(usageCountChart) usageCountChart.resize();
             if(energyChart) energyChart.resize();
+            if(userEnergyChart) userEnergyChart.resize();
             if(usageTimeChart) usageTimeChart.resize();
         }, 300); // Small delay for transition
     }
@@ -77,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Chart (Chart.js)
     let usageCountChart = null;
     let energyChart = null;
+    let userEnergyChart = null;
     let usageTimeChart = null;
     
     
@@ -375,11 +377,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderCharts(data, range) {
         const ctxUsage = document.getElementById('usageCountChart').getContext('2d');
         const ctxEnergy = document.getElementById('energyChart').getContext('2d');
+        const ctxUserEnergy = document.getElementById('userEnergyChart').getContext('2d'); 
         const ctxTime = document.getElementById('usageTimeChart').getContext('2d');
 
         // Process Data
         const stationCounts = {};
         const stationEnergy = {};
+        const userStationEnergy = {}; 
+        const allStationsSet = new Set();
         let timeLabels = [];
         const stationTimeData = {}; 
 
@@ -392,11 +397,17 @@ document.addEventListener('DOMContentLoaded', () => {
         // Aggregation logic
         data.forEach(tx => {
             const cp = tx.charge_point_id;
+            const tag = tx.id_tag || 'Unknown';
             const energy = tx.total_energy || (tx.meter_stop - tx.meter_start) || 0;
             
             // Pie and Bar data
             stationCounts[cp] = (stationCounts[cp] || 0) + 1;
             stationEnergy[cp] = (stationEnergy[cp] || 0) + energy;
+
+            // User Energy data
+            if (!userStationEnergy[tag]) userStationEnergy[tag] = {};
+            userStationEnergy[tag][cp] = (userStationEnergy[tag][cp] || 0) + energy;
+            allStationsSet.add(cp);
 
             // Line chart data grouping
             const date = new Date(tx.start_time);
@@ -505,7 +516,101 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // --- 3. Usage Frequency Over Time (Line Chart) ---
+        // --- 3. Energy per User Bar Chart ---
+        const stackTopLabelPlugin = {
+            id: 'stackTopLabel',
+            afterDatasetsDraw(chart, args, options) {
+                const { ctx, scales: { x, y } } = chart;
+                ctx.save();
+                
+                // Duyệt qua từng cột (từng User)
+                const meta = chart.getDatasetMeta(0);
+                meta.data.forEach((bar, index) => {
+                    let total = 0;
+                    chart.data.datasets.forEach((dataset, i) => {
+                        if(chart.isDatasetVisible(i)) { 
+                             total += parseFloat(dataset.data[index] || 0);
+                        }
+                    });
+
+                    if (total > 0) {
+                        const text = total.toFixed(2); 
+                        // Vị trí X: Giữa cột
+                        const xPos = bar.x;
+                        // Vị trí Y: Đỉnh cột
+                        const yPos = y.getPixelForValue(total);
+
+                        // Vẽ text
+                        ctx.fillStyle = '#172b4d'; 
+                        ctx.font = 'bold 12px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillText(text, xPos, yPos - 5); 
+                    }
+                });
+                ctx.restore();
+            }
+        };
+
+        const userLabels = Object.keys(userStationEnergy);
+        const stationsList = Array.from(allStationsSet).sort();
+
+        const userDatasets = stationsList.map((station, index) => ({
+            label: station,
+            data: userLabels.map(tag => {
+                const val = userStationEnergy[tag][station] || 0;
+                return (val / 1000).toFixed(2);
+            }),
+            backgroundColor: bgColors[index % bgColors.length],
+            borderWidth: 1,
+            borderRadius: 2,
+            stack: 'Stack 0',
+        }));
+
+        if (userEnergyChart) userEnergyChart.destroy();
+        userEnergyChart = new Chart(ctxUserEnergy, {
+            type: 'bar',
+            data: {
+                labels: userLabels,
+                datasets: userDatasets
+            },
+            plugins: [stackTopLabelPlugin], 
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                scales: {
+                    x: { 
+                        stacked: true,
+                        grid: { display: false },
+                        title: { display: true, text: 'ID Tags' }
+                    },
+                    y: { 
+                        stacked: true,
+                        beginAtZero: true, 
+                        title: { display: true, text: 'Energy (kWh)' },
+                        grid: { color: '#f0f0f0' }
+                    }
+                },
+                plugins: { 
+                    legend: { display: true, position: 'top', labels: { boxWidth: 12 } },
+                    tooltip: {
+                        mode: 'nearest',
+                        intersect: true,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) label += ': ';
+                                if (context.parsed.y !== null) label += context.parsed.y + ' kWh';
+                                return label;
+                            }
+                        }
+                    },
+                    datalabels: { display: false } 
+                }
+            }
+        });
+
+        // --- 4. Usage Frequency Over Time (Line Chart) ---
         const lineDatasets = Object.keys(stationTimeData).map((cp, index) => {
             return {
                 label: cp,
