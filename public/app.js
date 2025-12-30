@@ -144,6 +144,8 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSqlData = await response.json();
             
             if(document.getElementById('search-tx-id')) document.getElementById('search-tx-id').value = ''; 
+
+            if(document.getElementById('search-id-tag')) document.getElementById('search-id-tag').value = '';
             
             filterAndRenderSqlData();
     
@@ -156,6 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.filterAndRenderSqlData = function() {
         const tbody = document.getElementById('sql-table-body');
         const txSearch = document.getElementById('search-tx-id')?.value.toLowerCase() || '';
+        const idTagSearch = document.getElementById('search-id-tag')?.value.toLowerCase() || '';
         const cpSearch = document.getElementById('search-cp-id')?.value.toLowerCase() || '';
         const dateSearch = document.getElementById('search-date')?.value || ''; 
 
@@ -164,6 +167,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const filteredData = currentSqlData.filter(row => {
             const matchTx = row.id.toString().includes(txSearch);
             const matchCp = row.charge_point_id.toLowerCase().includes(cpSearch);
+            const rowIdTag = row.id_tag ? row.id_tag.toLowerCase() : '';
+            const matchIdTag = rowIdTag.includes(idTagSearch);
             
             let matchDate = true;
             if (dateSearch) {
@@ -171,7 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 matchDate = rowDate === dateSearch;
             }
 
-            return matchTx && matchCp && matchDate;
+            return matchTx && matchCp && matchDate && matchIdTag;
         });
 
         if (filteredData.length === 0) {
@@ -199,6 +204,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if(document.getElementById('search-tx-id')) {
         document.getElementById('search-tx-id').addEventListener('input', filterAndRenderSqlData);
+        if(document.getElementById('search-id-tag')) {
+        document.getElementById('search-id-tag').addEventListener('input', filterAndRenderSqlData);
+    }
         document.getElementById('search-cp-id').addEventListener('input', filterAndRenderSqlData);
         document.getElementById('search-date').addEventListener('change', filterAndRenderSqlData);
     }
